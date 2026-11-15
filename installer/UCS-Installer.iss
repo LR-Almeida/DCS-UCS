@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  DCS-UCS (Universal Control Sync) - Inno Setup script
 ;  Build: run build.bat first (creates ..\publish), then compile this file with
-;  Inno Setup 6 (ISCC.exe installer\UCS-Installer.iss). Output: installer\Output\
+;  Inno Setup 7 (ISCC.exe installer\UCS-Installer.iss). Output: installer\Output\
 ; =============================================================================
 
 #define AppName "DCS-UCS"
@@ -30,6 +30,7 @@ OutputBaseFilename=DCS-UCS-Setup-{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+SetupArchitecture=x64
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin

@@ -166,8 +166,9 @@ Please share working profiles through a pull request!
 
 ## Building from source
 
-Requirements: Windows, [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), optionally
-[Inno Setup 6](https://jrsoftware.org/isinfo.php) for the installer.
+Requirements: Windows, [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or newer, optionally
+[Inno Setup 7](https://jrsoftware.org/isinfo.php) for the installer (found via `PATH`, the `ISCC` variable or its
+registry entry, so any install folder works).
 
 ```bat
 git clone https://github.com/LR-Almeida/DCS-UCS.git
