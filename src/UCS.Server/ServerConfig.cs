@@ -18,6 +18,10 @@ public sealed class ServerConfig
     /// <summary>Per-client flood protection.</summary>
     public int MaxPacketsPerSecond { get; set; } = 200;
     public int StatusIntervalSeconds { get; set; } = 60;
+    /// <summary>Ask an external service for this machine's public IP at startup (like games do).</summary>
+    public bool DetectPublicIp { get; set; } = true;
+    /// <summary>Print a console notice when a newer UCS-Server release exists (GitHub API, no auto-update).</summary>
+    public bool CheckForUpdates { get; set; } = true;
     public bool Verbose { get; set; } = false;
 
     private static readonly JsonSerializerOptions Options = new()

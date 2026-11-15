@@ -92,15 +92,26 @@ Settings are stored in `client_config.json` (next to the exe, or `%APPDATA%\DCS-
      "MaxClients": 256,
      "MaxPacketsPerSecond": 200,
      "StatusIntervalSeconds": 60,
+     "DetectPublicIp": true,
      "Verbose": false
    }
    ```
+   At startup the console shows the addresses to share, for example:
+   ```
+   [INFO] Local address:  192.168.1.50:5055   (local network / router)
+   [INFO] Local address:  26.12.34.56:5055    (Radmin VPN - players in the same Radmin VPN network)
+   [INFO] PUBLIC address: 203.0.113.7:5055    <- give this to players over the internet
+   ```
+   The public IP is obtained like games do, by asking an external "what is my IP" service
+   (api.ipify.org, with fallbacks). Set `"DetectPublicIp": false` to disable that request.
    - `SessionMatch: "Unit"` → key `{DcsServer}|{Group}|{Unit}` (crew sharing one multicrew unit).
    - `SessionMatch: "Group"` → key `{DcsServer}|{Group}` (each crew member in their own unit of the same group).
    - Command line: `UCS-Server.exe --port 5055 --config path\to\server_config.json`
 2. Open **UDP 5055** in the Windows Firewall (the installer has an option for it) and forward it on your router
    if players connect over the internet.
-3. Give players your public IP / DDNS name — or set up Auto-Connect below.
+3. Give players the **PUBLIC address** shown by the server (or a DDNS name) — or set up Auto-Connect below.
+   If your ISP uses CGNAT (no public IP of your own), port forwarding cannot work: use a virtual LAN such as
+   Radmin VPN, ZeroTier or Tailscale and share the address shown for it.
 
 The server only relays packets between clients with the **same SessionKey and the same aircraft**, ignores
 clients in Standby and drops clients that send no heartbeat for 15 s.
@@ -180,6 +191,37 @@ throttles, brakes…).
 Options: `--out <dir|file.json>`, `--dcs <DCS folder>`, `--no-axes`, `--keep-flight-axes`, `--text-parser`, `--verbose`.
 
 ---
+
+## Updates
+
+`UCS-Client.exe` checks the project's GitHub releases at startup and every 6 hours (Update tab →
+*Check for updates automatically*, on by default). When a new version exists it offers:
+
+- **Update now** — DCS keeps the old scripts until it restarts;
+- **Close DCS and update** — asks DCS to close and brings it to the front so you confirm its exit box (DCS is never killed), then installs;
+- **Update when DCS closes** — downloads now, installs as soon as DCS exits;
+- **Remind me later** / **Skip this version**.
+
+The installer is downloaded from the release, checked against the release's `SHA256SUMS.txt`, and run
+silently (one Windows permission prompt). It updates the DCS scripts with your previous choices and
+reopens the client. `UCS-Server.exe` only prints a notice in its console; server admins update it themselves.
+
+**Compatibility:** newer clients always work with older UCS servers. Features the server does not support
+are disabled and listed in the client log, e.g. `Server 0.1.0-alpha: 'UCS version check between crew
+members' disabled (requires UCS-Server 0.1.1-alpha or newer)`.
+
+## Privacy
+
+DCS-UCS has no telemetry and no central service. The only network connections are:
+
+| Connection | Who | Purpose | How to turn it off |
+|---|---|---|---|
+| The UCS server you choose | Client | Cockpit sync (pilot name, DCS server/group/unit, aircraft, mod version, switch values) | Don't connect |
+| `api.github.com`, `github.com` | Client, Server | Check for / download updates | Update tab / `"CheckForUpdates": false` |
+| `api.ipify.org` (fallbacks: `checkip.amazonaws.com`, `icanhazip.com`) | Server, server hook | Show the public IP to share | `"DetectPublicIp": false` / set the address in `UCS-AutoConnect.cfg` |
+
+The UCS server keeps data only in memory while clients are connected and writes nothing to disk except its
+console output.
 
 ## Building from source
 

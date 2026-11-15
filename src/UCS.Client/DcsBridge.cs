@@ -39,8 +39,8 @@ public sealed class DcsBridge : IDisposable
         }
         catch (SocketException ex)
         {
-            Log?.Invoke($"ERRO: não foi possível abrir a porta local {port} ({who}): {ex.SocketErrorCode}. " +
-                        "Outro UCS-Client já está aberto?");
+            Log?.Invoke($"ERROR: could not open local port {port} ({who}): {ex.SocketErrorCode}. " +
+                        "Is another UCS-Client already running?");
             return null;
         }
     }

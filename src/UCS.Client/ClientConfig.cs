@@ -10,9 +10,17 @@ public sealed class ClientConfig
     public bool AcceptAutoConnect { get; set; } = true;
     public string ManualRoom { get; set; } = "";
     public string PilotName { get; set; } = "Pilot";
+    /// <summary>Use the player name reported by DCS instead of PilotName.</summary>
+    public bool AutoDetectPilotName { get; set; } = true;
     public bool ConnectOnStartup { get; set; } = false;
     /// <summary>Generate missing/outdated profiles locally from the installed mod.</summary>
     public bool AutoGenerateProfiles { get; set; } = true;
+    /// <summary>Check GitHub for new UCS versions (at startup and every 6 hours).</summary>
+    public bool CheckForUpdates { get; set; } = true;
+    /// <summary>Offer alpha/beta versions too (always on while running a pre-release).</summary>
+    public bool IncludePreReleases { get; set; } = true;
+    /// <summary>Version the user chose to skip in the update pop-up.</summary>
+    public string SkippedVersion { get; set; } = "";
 
     private static readonly JsonSerializerOptions Options = new()
     {

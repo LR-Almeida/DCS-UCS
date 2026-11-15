@@ -10,7 +10,7 @@
 -- =============================================================================
 
 local UCSHook = {
-    version      = "0.1.0-alpha",
+    version      = "0.1.1-alpha",
     clientHost   = "127.0.0.1",
     clientPort   = 5053,
     prefix       = "UCS_AUTOCONNECT:",
@@ -144,6 +144,19 @@ local function getPlayerUnitId()
     return nil
 end
 
+local function getPlayerName()
+    local myId = safe(function() return net.get_my_player_id() end)
+    local name = nil
+    if myId ~= nil then
+        name = safe(function() return net.get_player_info(myId, "name") end)
+    end
+    if (name == nil or name == "") then
+        name = safe(function() return DCS.getPlayerName() end)
+    end
+    if type(name) ~= "string" then return "" end
+    return name
+end
+
 local function buildState()
     local state = {
         type       = "slot",
@@ -153,6 +166,7 @@ local function buildState()
         unit       = "",
         aircraft   = "",
         in_aircraft = false,
+        player     = getPlayerName(),
     }
     local unitId = getPlayerUnitId()
     if unitId then
@@ -171,7 +185,7 @@ local function buildState()
 end
 
 local function stateKey(s)
-    return table.concat({ s.server, s.group, s.unit, s.aircraft, tostring(s.in_aircraft) }, "|")
+    return table.concat({ s.server, s.group, s.unit, s.aircraft, tostring(s.in_aircraft), s.player }, "|")
 end
 
 local function publishState(force)

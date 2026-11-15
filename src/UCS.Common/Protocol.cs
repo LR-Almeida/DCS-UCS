@@ -9,12 +9,44 @@ namespace UCS.Common;
 /// </summary>
 public static class Protocol
 {
-    public const string Version = "0.1.0-alpha";
+    public const string Version = "0.1.1-alpha";
     public const int DefaultServerPort = 5055;
     public const int ExportSendPort = 5051;   // Export.lua -> Client
     public const int ExportListenPort = 5052; // Client -> Export.lua
     public const int HookPort = 5053;         // GameGUI hook -> Client
     public const int MaxDatagram = 60000;
+
+    /// <summary>
+    /// Wire protocol level. 1 = 0.1.0-alpha (no field sent). Raised when messages gain fields;
+    /// old peers simply ignore unknown JSON fields, so newer clients keep working with old servers.
+    /// </summary>
+    public const int Level = 2;
+
+    /// <summary>
+    /// Format of "args" values. Only a change here breaks sync between crew members, so the
+    /// server refuses to pair clients with different formats. Missing field = 1.
+    /// </summary>
+    public const int ArgsFormat = 1;
+
+    /// <summary>Optional server features, announced in "welcome.features" (level 2+).</summary>
+    public static class Features
+    {
+        /// <summary>Server compares mod version + profile fingerprint (0.1.0-alpha already does it).</summary>
+        public const string ModCheck = "mod_check";
+        /// <summary>Server reports each crew member's UCS version and blocks incompatible args formats.</summary>
+        public const string UcsVersionCheck = "ucs_version_check";
+
+        /// <summary>Feature -> (minimum server version, what the user loses without it).</summary>
+        public static readonly IReadOnlyDictionary<string, (string MinServer, string Description)> Known =
+            new Dictionary<string, (string, string)>
+            {
+                [ModCheck] = ("0.1.0-alpha", "mod version / profile compatibility check"),
+                [UcsVersionCheck] = ("0.1.1-alpha", "UCS version check between crew members (warning when a crew member runs another UCS version)"),
+            };
+
+        /// <summary>Features of a server that does not announce them (0.1.0-alpha).</summary>
+        public static readonly string[] Level1 = { ModCheck };
+    }
 
     // Message types
     public const string State = "state";            // C->S join + heartbeat
@@ -65,6 +97,12 @@ public sealed class UcsMessage
     public string? ModVersion { get; set; }
     /// <summary>AircraftProfile.Fingerprint() of the loaded profile.</summary>
     public string? ProfileHash { get; set; }
+    /// <summary>Sender protocol level (missing = 1).</summary>
+    public int? Protocol { get; set; }
+    /// <summary>Sender args format (missing = 1).</summary>
+    public int? ArgsFormat { get; set; }
+    /// <summary>Optional features supported by the server (welcome, level 2+).</summary>
+    public List<string>? Features { get; set; }
 
     // Argument sync (args)
     public Dictionary<string, double>? Values { get; set; }
@@ -78,6 +116,8 @@ public sealed class UcsMessage
     public List<string>? PeerNames { get; set; }
     /// <summary>Crew members in the same cockpit that cannot sync (different mod version / profile).</summary>
     public List<PeerInfo>? Incompatible { get; set; }
+    /// <summary>All synced crew members with their UCS versions (level 2+).</summary>
+    public List<PeerInfo>? Crew { get; set; }
     public string? Message { get; set; }
 }
 
@@ -86,4 +126,7 @@ public sealed class PeerInfo
     public string Name { get; set; } = "";
     public string ModVersion { get; set; } = "";
     public string ProfileHash { get; set; } = "";
+    /// <summary>UCS client version of that crew member ("" when unknown / old client).</summary>
+    public string UcsVersion { get; set; } = "";
+    public int ArgsFormat { get; set; } = 1;
 }

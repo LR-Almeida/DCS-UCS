@@ -7,7 +7,7 @@
 #define AppName "DCS-UCS"
 #define AppFullName "DCS-UCS (Universal Control Sync)"
 #ifndef AppVersion
-  #define AppVersion "0.1.0-alpha"
+  #define AppVersion "0.1.1-alpha"
 #endif
 #define AppPublisher "DCS-UCS contributors"
 #define AppURL "https://github.com/LR-Almeida/DCS-UCS"
@@ -36,6 +36,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\UCS-Client.exe
 UninstallDisplayName={#AppFullName}
+; In-app updates run this installer with /SILENT /UPDATE=1: close the running client, reuse previous choices
+CloseApplications=yes
+RestartApplications=no
+UsePreviousTasks=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -68,8 +72,12 @@ Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\UCS Client"; Filename: "{app}\UCS-Client.exe"; Tasks: desktopicon
 
 [Run]
+; delete first so updates/reinstalls never create duplicate rules
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""DCS-UCS Server"""; Flags: runhidden; Tasks: firewall
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""DCS-UCS Server"" dir=in action=allow protocol=UDP localport=5055"; Flags: runhidden; Tasks: firewall
 Filename: "{app}\UCS-Client.exe"; Description: "{cm:LaunchProgram,UCS Client}"; Flags: nowait postinstall skipifsilent
+; reopen the client after an in-app update, as the normal (non-elevated) user
+Filename: "{app}\UCS-Client.exe"; Flags: nowait runasoriginaluser; Check: IsInAppUpdate
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""DCS-UCS Server"""; Flags: runhidden; RunOnceId: "DelFirewall"
@@ -272,6 +280,12 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := (PageID = ServerAddrPage.ID) and not WizardIsTaskSelected('dcsserverhook');
+end;
+
+{ True when started by UCS-Client's updater (/UPDATE=1) }
+function IsInAppUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

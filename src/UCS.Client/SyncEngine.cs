@@ -22,11 +22,14 @@ public sealed record EngineStatus(
     bool ConnectionRequested,
     bool Connected,
     string ServerAddress,
+    string ServerVersion,
     IReadOnlyList<string> Peers,
     IReadOnlyList<PeerInfo> Incompatible,
     string ModVersion,
     string ProfileHash,
     bool GeneratingProfile,
+    string PilotName,
+    string DetectedPilot,
     long SentArgs,
     long ReceivedArgs);
 
@@ -53,6 +56,7 @@ public sealed class SyncEngine : IDisposable
 
     // DCS state
     private string _hookServer = "", _hookGroup = "", _hookUnit = "", _hookAircraft = "";
+    private string _detectedPilot = DcsPlayerName.FromNicknames() ?? "";
     private string _exportAircraft = "";
     private bool _exportActive;
     private long _exportLastSeen = -100000;
@@ -79,6 +83,10 @@ public sealed class SyncEngine : IDisposable
     private string _sessionKey = "";
     private List<string> _peers = new();
     private List<PeerInfo> _incompatible = new();
+    private string _serverVersion = "";
+    private bool _serverChecked;
+    private readonly HashSet<string> _crewVersionWarned = new(StringComparer.OrdinalIgnoreCase);
+    private bool _scriptVersionWarned;
     private long _seq;
     private long _sentArgs, _receivedArgs;
     private int _connectGeneration;
@@ -101,7 +109,7 @@ public sealed class SyncEngine : IDisposable
     {
         _bridge.Start();
         _timer.Change(500, 500);
-        Log?.Invoke($"UCS-Client {Protocol.Version} iniciado. Aguardando DCS (UDP 5051/5053)...");
+        Log?.Invoke($"UCS-Client {Protocol.Version} started. Waiting for DCS (UDP 5051/5053)...");
         if (_cfg.ConnectOnStartup) _ = ConnectAsync();
     }
 
@@ -110,7 +118,8 @@ public sealed class SyncEngine : IDisposable
         bool roomChanged;
         lock (_gate)
         {
-            roomChanged = _cfg.ManualRoom != cfg.ManualRoom || _cfg.PilotName != cfg.PilotName;
+            roomChanged = _cfg.ManualRoom != cfg.ManualRoom || _cfg.PilotName != cfg.PilotName ||
+                          _cfg.AutoDetectPilotName != cfg.AutoDetectPilotName;
             _cfg = cfg.Clone();
         }
         if (roomChanged) SendState();
@@ -137,11 +146,14 @@ public sealed class SyncEngine : IDisposable
                 ConnectionRequested: _connectRequested,
                 Connected: _connectRequested && now - _lastWelcome < WelcomeTimeoutMs,
                 ServerAddress: $"{_cfg.ServerHost}:{_cfg.ServerPort}",
+                ServerVersion: _serverVersion,
                 Peers: _peers.ToList(),
                 Incompatible: _incompatible.ToList(),
                 ModVersion: _modVersion,
                 ProfileHash: _profileHash,
                 GeneratingProfile: _generating,
+                PilotName: EffectivePilotName,
+                DetectedPilot: _detectedPilot,
                 SentArgs: _sentArgs,
                 ReceivedArgs: _receivedArgs);
         }
@@ -156,6 +168,10 @@ public sealed class SyncEngine : IDisposable
             return _hookAircraft;
         }
     }
+
+    /// <summary>Name sent to the crew: the DCS player name when auto-detection is on.</summary>
+    private string EffectivePilotName =>
+        _cfg.AutoDetectPilotName && _detectedPilot.Length > 0 ? _detectedPilot : _cfg.PilotName;
 
     private bool IsStandby => !(_profile != null && _exportActive && Now - _exportLastSeen < ExportAliveMs);
 
@@ -176,14 +192,14 @@ public sealed class SyncEngine : IDisposable
 
         if (string.IsNullOrWhiteSpace(host))
         {
-            Log?.Invoke("Informe o IP/host do servidor UCS.");
+            Log?.Invoke("Enter the UCS server IP/host.");
             return false;
         }
-        Log?.Invoke($"Conectando a {host}:{port}...");
+        Log?.Invoke($"Connecting to {host}:{port}...");
         var ep = await UdpHelper.ResolveAsync(host.Trim(), port).ConfigureAwait(false);
         if (ep == null)
         {
-            Log?.Invoke($"Não foi possível resolver '{host}'.");
+            Log?.Invoke($"Could not resolve '{host}'.");
             return false;
         }
 
@@ -195,6 +211,8 @@ public sealed class SyncEngine : IDisposable
             _serverCts = new CancellationTokenSource();
             _connectRequested = true;
             _lastWelcome = -100000;
+            _serverChecked = false;
+            _serverVersion = "";
             _peers = new List<string>();
             _ = ServerReceiveLoopAsync(_serverUdp, _serverCts.Token);
         }
@@ -240,7 +258,7 @@ public sealed class SyncEngine : IDisposable
         cts?.Cancel();
         udp?.Dispose();
         cts?.Dispose();
-        if (log && wasConnected) Log?.Invoke("Desconectado do servidor UCS.");
+        if (log && wasConnected) Log?.Invoke("Disconnected from the UCS server.");
     }
 
     private void SendToServer(UcsMessage msg)
@@ -273,7 +291,7 @@ public sealed class SyncEngine : IDisposable
             {
                 Type = Protocol.State,
                 ClientId = _clientId,
-                Name = _cfg.PilotName,
+                Name = EffectivePilotName,
                 Version = Protocol.Version,
                 Server = _hookServer,
                 Group = _hookGroup,
@@ -283,6 +301,8 @@ public sealed class SyncEngine : IDisposable
                 Standby = IsStandby,
                 ModVersion = _profile != null ? _modVersion : null,
                 ProfileHash = _profile != null ? _profileHash : null,
+                Protocol = UCS.Common.Protocol.Level,
+                ArgsFormat = UCS.Common.Protocol.ArgsFormat,
             };
         }
         SendToServer(msg);
@@ -309,7 +329,7 @@ public sealed class SyncEngine : IDisposable
             }
             catch (Exception ex)
             {
-                Log?.Invoke("Erro ao processar pacote do servidor: " + ex.Message);
+                Log?.Invoke("Error processing server packet: " + ex.Message);
             }
         }
     }
@@ -322,6 +342,7 @@ public sealed class SyncEngine : IDisposable
             {
                 bool first;
                 var incompatibleMsgs = new List<string>();
+                var serverNotes = new List<string>();
                 List<string> newPeers = msg.PeerNames ?? new List<string>();
                 string joinedNames = "";
                 lock (_gate)
@@ -331,8 +352,8 @@ public sealed class SyncEngine : IDisposable
                     _sessionKey = msg.SessionKey ?? "";
                     var added = newPeers.Except(_peers).ToList();
                     var removed = _peers.Except(newPeers).ToList();
-                    if (added.Count > 0) joinedNames += "Entrou na cabine: " + string.Join(", ", added) + ". ";
-                    if (removed.Count > 0) joinedNames += "Saiu da cabine: " + string.Join(", ", removed) + ".";
+                    if (added.Count > 0) joinedNames += "Joined the cockpit: " + string.Join(", ", added) + ". ";
+                    if (removed.Count > 0) joinedNames += "Left the cockpit: " + string.Join(", ", removed) + ".";
                     _peers = newPeers;
 
                     var inc = msg.Incompatible ?? new List<PeerInfo>();
@@ -340,14 +361,31 @@ public sealed class SyncEngine : IDisposable
                     foreach (var i in inc.Where(i => !oldKeys.Contains($"{i.Name}|{i.ModVersion}|{i.ProfileHash}")))
                         incompatibleMsgs.Add(DescribeIncompatibility(i, _modVersion, _profileHash));
                     _incompatible = inc;
+
+                    if (!_serverChecked)
+                    {
+                        _serverChecked = true;
+                        _serverVersion = msg.Version ?? "";
+                        serverNotes.AddRange(DescribeServerCapabilities(msg));
+                    }
+                    if (msg.Crew != null)
+                    {
+                        foreach (var p in msg.Crew.Where(p => p.UcsVersion.Length > 0 && p.UcsVersion != UCS.Common.Protocol.Version))
+                        {
+                            if (_crewVersionWarned.Add($"{p.Name}|{p.UcsVersion}"))
+                                serverNotes.Add($"NOTE: {p.Name} uses UCS {p.UcsVersion} (you: {UCS.Common.Protocol.Version}). " +
+                                                "Sync works, but using the same version is recommended (Update tab).");
+                        }
+                    }
                 }
-                if (first) Log?.Invoke("Conectado ao servidor UCS.");
+                if (first) Log?.Invoke($"Connected to the UCS server{(msg.Version is { Length: > 0 } v ? $" (version {v})" : "")}.");
+                foreach (var n in serverNotes) Log?.Invoke(n);
                 if (joinedNames.Length > 0) Log?.Invoke(joinedNames.Trim());
-                foreach (var m in incompatibleMsgs) Log?.Invoke("ERRO DE COMPATIBILIDADE: " + m);
+                foreach (var m in incompatibleMsgs) Log?.Invoke("COMPATIBILITY ERROR: " + m);
                 break;
             }
             case Protocol.Error:
-                Log?.Invoke("Servidor: " + msg.Message);
+                Log?.Invoke("Server: " + msg.Message);
                 break;
             case Protocol.PeerJoined:
                 if (!string.IsNullOrEmpty(msg.ClientId)) SendSnapshotTo(msg.ClientId, msg.Name);
@@ -358,14 +396,33 @@ public sealed class SyncEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// Backward compatibility: newer clients work with older servers; features the server does not
+    /// support are disabled and listed in the log.
+    /// </summary>
+    private static List<string> DescribeServerCapabilities(UcsMessage welcome)
+    {
+        var notes = new List<string>();
+        var features = welcome.Features ?? UCS.Common.Protocol.Features.Level1.ToList();
+        var serverVersion = welcome.Version is { Length: > 0 } v ? v : "unknown";
+        foreach (var (feature, info) in UCS.Common.Protocol.Features.Known)
+        {
+            if (!features.Contains(feature))
+                notes.Add($"Server {serverVersion}: '{info.Description}' disabled (requires UCS-Server {info.MinServer} or newer).");
+        }
+        if (welcome.ArgsFormat is { } fmt && fmt != UCS.Common.Protocol.ArgsFormat)
+            notes.Add($"WARNING: server uses args format {fmt}, this client uses {UCS.Common.Protocol.ArgsFormat}. Update UCS-Server.");
+        return notes;
+    }
+
     /// <summary>Human readable reason why a crew member cannot be synced.</summary>
     public static string DescribeIncompatibility(PeerInfo peer, string myVersion, string myHash)
     {
-        static string V(string v) => v.Length > 0 ? v : "sem versão";
+        static string V(string v) => v.Length > 0 ? v : "no version";
         if (peer.ModVersion != myVersion)
-            return $"{peer.Name} usa o mod versão {V(peer.ModVersion)} e você {V(myVersion)}. Atualizem para a mesma versão.";
-        return $"{peer.Name} tem o mesmo mod ({V(myVersion)}) mas um perfil diferente ({peer.ProfileHash} x {myHash}). " +
-               @"Apaguem o perfil desta aeronave em %APPDATA%\DCS-UCS\profiles para ele ser gerado de novo.";
+            return $"{peer.Name} has mod version {V(peer.ModVersion)} and you have {V(myVersion)}. Both must install the same version.";
+        return $"{peer.Name} has the same mod ({V(myVersion)}) but a different profile ({peer.ProfileHash} vs {myHash}). " +
+               @"Both delete this aircraft profile in %APPDATA%\DCS-UCS\profiles so it is generated again.";
     }
 
     private void SendSnapshotTo(string targetId, string? name)
@@ -379,7 +436,7 @@ public sealed class SyncEngine : IDisposable
             aircraft = _profileAircraft;
         }
         if (values.Count == 0) return;
-        Log?.Invoke($"Enviando estado da cabine para {name ?? "novo tripulante"} ({values.Count} args).");
+        Log?.Invoke($"Sending cockpit state to {name ?? "new crew member"} ({values.Count} args).");
         foreach (var chunk in values.Chunk(MaxArgsPerPacket))
         {
             SendToServer(new UcsMessage
@@ -431,7 +488,8 @@ public sealed class SyncEngine : IDisposable
                     _standbySent = false;
                     _localValues.Clear();
                 }
-                Log?.Invoke($"UCS-Export.lua conectado (versão {(parts.Length > 1 ? parts[1] : "?")}).");
+                Log?.Invoke($"UCS-Export.lua connected (version {(parts.Length > 1 ? parts[1] : "?")}).");
+                CheckScriptVersion("UCS-Export.lua", parts.Length > 1 ? parts[1] : "");
                 EvaluateProfile();
                 break;
 
@@ -449,12 +507,12 @@ public sealed class SyncEngine : IDisposable
                     _exportAircraft = name;
                     _exportActive = active;
                 }
-                if (changed) Log?.Invoke(name.Length > 0 ? $"DCS: aeronave '{name}'." : "DCS: fora de aeronave / menu.");
+                if (changed) Log?.Invoke(name.Length > 0 ? $"DCS: aircraft '{name}'." : "DCS: no aircraft / menu.");
                 if (activated)
                 {
                     // Ask for a full snapshot so we know the current cockpit state
                     _bridge.SendToExport("SNAPSHOT");
-                    Log?.Invoke($"Sincronização ATIVA ({name}).");
+                    Log?.Invoke($"Sync ACTIVE ({name}).");
                     SendState();
                 }
                 else if (changed)
@@ -512,7 +570,7 @@ public sealed class SyncEngine : IDisposable
                     _exportLastSeen = -100000;
                     _localValues.Clear();
                 }
-                Log?.Invoke("UCS-Export.lua encerrado (fim da missão).");
+                Log?.Invoke("UCS-Export.lua stopped (mission ended).");
                 EvaluateProfile();
                 SendState();
                 break;
@@ -538,10 +596,23 @@ public sealed class SyncEngine : IDisposable
         var group = Str(root, "group");
         var unit = Str(root, "unit");
         var aircraft = Str(root, "aircraft");
+        var player = Str(root, "player").Trim();
+        CheckScriptVersion("UCS-Hook.lua", Str(root, "version"));
+        bool nameChanged = false;
+        if (player.Length > 0)
+        {
+            lock (_gate)
+            {
+                if (player.Length > 32) player = player[..32];
+                nameChanged = player != _detectedPilot;
+                _detectedPilot = player;
+            }
+            if (nameChanged) Log?.Invoke($"DCS player name detected: {player}");
+        }
         bool changed;
         lock (_gate)
         {
-            changed = server != _hookServer || group != _hookGroup || unit != _hookUnit || aircraft != _hookAircraft;
+            changed = server != _hookServer || group != _hookGroup || unit != _hookUnit || aircraft != _hookAircraft || nameChanged;
             _hookServer = server;
             _hookGroup = group;
             _hookUnit = unit;
@@ -551,7 +622,7 @@ public sealed class SyncEngine : IDisposable
         {
             Log?.Invoke(unit.Length > 0
                 ? $"Slot: {server} | {group} | {unit} ({aircraft})"
-                : "Slot: nenhum (espectador / menu).");
+                : "Slot: none (spectator / menu).");
             EvaluateProfile();
             SendState();
         }
@@ -567,12 +638,12 @@ public sealed class SyncEngine : IDisposable
         {
             if (!_cfg.AcceptAutoConnect)
             {
-                Log?.Invoke($"Auto-Connect recebido ({addr}) mas está desativado nas opções.");
+                Log?.Invoke($"Auto-Connect received ({addr}) but it is disabled in the settings.");
                 return;
             }
             if (!UdpHelper.TryParseAddress(addr, Protocol.DefaultServerPort, out var host, out var port))
             {
-                Log?.Invoke($"Auto-Connect: endereço inválido '{addr}'.");
+                Log?.Invoke($"Auto-Connect: invalid address '{addr}'.");
                 return;
             }
             var same = string.Equals(host, _cfg.ServerHost, StringComparison.OrdinalIgnoreCase) && port == _cfg.ServerPort;
@@ -581,8 +652,8 @@ public sealed class SyncEngine : IDisposable
             _cfg.ServerPort = port;
             snapshot = _cfg.Clone();
         }
-        Log?.Invoke($"Auto-Connect do servidor DCS: {snapshot.ServerHost}:{snapshot.ServerPort}");
-        try { snapshot.Save(); } catch (Exception ex) { Log?.Invoke("Não foi possível salvar a configuração: " + ex.Message); }
+        Log?.Invoke($"Auto-Connect from DCS server: {snapshot.ServerHost}:{snapshot.ServerPort}");
+        try { snapshot.Save(); } catch (Exception ex) { Log?.Invoke("Could not save settings: " + ex.Message); }
         ConfigChanged?.Invoke(snapshot);
         _ = ConnectAsync();
     }
@@ -612,7 +683,7 @@ public sealed class SyncEngine : IDisposable
 
         if (aircraft.Length == 0)
         {
-            if (current != null) Log?.Invoke("Standby: fora de aeronave.");
+            if (current != null) Log?.Invoke("Standby: no aircraft.");
             SetStandby();
             return;
         }
@@ -644,29 +715,29 @@ public sealed class SyncEngine : IDisposable
             if (!alreadyStandby)
             {
                 Log?.Invoke(_profiles.LastError != null
-                    ? $"Perfil inválido para '{aircraft}': {_profiles.LastError}. Standby."
+                    ? $"Invalid profile for '{aircraft}': {_profiles.LastError}. Standby."
                     : mod == null
-                        ? $"Sem perfil para '{aircraft}' (módulo oficial ou mod não encontrado em Saved Games). Standby."
-                        : $"Sem perfil para '{aircraft}'. Standby.");
+                        ? $"No profile for '{aircraft}' (official module or mod not found in Saved Games). Standby."
+                        : $"No profile for '{aircraft}'. Standby.");
             }
             SetStandby();
             lock (_gate) _profileAircraft = aircraft;
-            if (autoGen && mod != null) StartAutoGenerate(mod, "primeira vez nesta aeronave");
+            if (autoGen && mod != null) StartAutoGenerate(mod, "first time in this aircraft");
             return;
         }
 
         // Profile generated for another version of the mod: regenerate it (mod updated)
         if (mod != null && !string.Equals(mod.Version, profile.ModVersion, StringComparison.Ordinal))
         {
-            if (autoGen && StartAutoGenerate(mod, $"mod atualizado: perfil {Fmt(profile.ModVersion)} → instalado {Fmt(mod.Version)}"))
+            if (autoGen && StartAutoGenerate(mod, $"mod updated: profile {Fmt(profile.ModVersion)} -> installed {Fmt(mod.Version)}"))
             {
                 SetStandby();
                 lock (_gate) _profileAircraft = aircraft;
                 return;
             }
             if (!autoGen)
-                Log?.Invoke($"AVISO: perfil de '{aircraft}' foi gerado para o mod {Fmt(profile.ModVersion)}, mas o instalado é " +
-                            $"{Fmt(mod.Version)}. Gere-o novamente.");
+                Log?.Invoke($"WARNING: the '{aircraft}' profile was generated for mod {Fmt(profile.ModVersion)}, but {Fmt(mod.Version)} is installed. " +
+                            "Regenerate it.");
         }
 
         lock (_gate)
@@ -677,12 +748,12 @@ public sealed class SyncEngine : IDisposable
             _profileHash = profile.Fingerprint();
             _localValues.Clear();
         }
-        Log?.Invoke($"Perfil carregado: {profile.AircraftName} ({profile.Args.Count} argumentos, mod {Fmt(_modVersion)}, perfil {_profileHash}).");
+        Log?.Invoke($"Profile loaded: {profile.AircraftName} ({profile.Args.Count} controls, mod {Fmt(_modVersion)}, profile {_profileHash}).");
         if (exportAlive) SendProfile(profile, aircraft);
         SendState();
     }
 
-    private static string Fmt(string version) => version.Length > 0 ? version : "sem versão";
+    private static string Fmt(string version) => version.Length > 0 ? version : "no version";
 
     /// <summary>
     /// Generates the profile in the background from the installed mod (local only, neutral labels).
@@ -696,31 +767,31 @@ public sealed class SyncEngine : IDisposable
             if (_generating || !_autoGenTried.Add(key)) return false;
             _generating = true;
         }
-        Log?.Invoke($"Gerando perfil de '{mod.Aircraft}' a partir do mod {Path.GetFileName(mod.ModDir)} ({reason})...");
+        Log?.Invoke($"Generating the '{mod.Aircraft}' profile from mod {Path.GetFileName(mod.ModDir)} ({reason})...");
         _ = Task.Run(() =>
         {
             try
             {
                 if (mod.ClickablePath == null)
                 {
-                    Log?.Invoke($"O mod {Path.GetFileName(mod.ModDir)} não tem clickabledata.lua legível. Standby.");
+                    Log?.Invoke($"Mod {Path.GetFileName(mod.ModDir)} has no readable clickabledata.lua. Standby.");
                     return;
                 }
                 var result = ProfileBuilder.Generate(mod.ModDir, mod.Aircraft, new ProfileGenOptions { ClickablePath = mod.ClickablePath });
                 if (result.Profile.Args.Count == 0)
                 {
-                    Log?.Invoke($"Não foi possível gerar o perfil de '{mod.Aircraft}' (nenhum controle encontrado).");
+                    Log?.Invoke($"Could not generate the '{mod.Aircraft}' profile (no controls found).");
                     return;
                 }
                 var dir = Path.Combine(AppPaths.UserDir, "profiles");
                 Directory.CreateDirectory(dir);
                 var path = Path.Combine(dir, ProfileBuilder.FileNameFor(mod.Aircraft));
                 result.Profile.Save(path);
-                Log?.Invoke($"Perfil gerado: {result.Profile.Args.Count} controles, mod {Fmt(result.Profile.ModVersion)} ({result.Method}).");
+                Log?.Invoke($"Profile generated: {result.Profile.Args.Count} controls, mod {Fmt(result.Profile.ModVersion)} ({result.Method}).");
             }
             catch (Exception ex)
             {
-                Log?.Invoke($"Falha ao gerar o perfil de '{mod.Aircraft}': {ex.Message}");
+                Log?.Invoke($"Failed to generate the '{mod.Aircraft}' profile: {ex.Message}");
             }
             finally
             {
@@ -793,7 +864,7 @@ public sealed class SyncEngine : IDisposable
                 exportTimedOut = _exportActive && now - _exportLastSeen >= ExportAliveMs;
                 if (exportTimedOut) _exportActive = false;
             }
-            if (exportTimedOut) Log?.Invoke("UCS-Export.lua sem resposta. Standby.");
+            if (exportTimedOut) Log?.Invoke("UCS-Export.lua not responding. Standby.");
 
             EvaluateProfile();
 
@@ -805,8 +876,21 @@ public sealed class SyncEngine : IDisposable
         }
         catch (Exception ex)
         {
-            Log?.Invoke("Erro interno: " + ex.Message);
+            Log?.Invoke("Internal error: " + ex.Message);
         }
+    }
+
+    /// <summary>DCS keeps the scripts it loaded at startup: warn when they do not match this client.</summary>
+    private void CheckScriptVersion(string script, string version)
+    {
+        if (version.Length == 0 || version == UCS.Common.Protocol.Version) return;
+        lock (_gate)
+        {
+            if (_scriptVersionWarned) return;
+            _scriptVersionWarned = true;
+        }
+        Log?.Invoke($"WARNING: DCS is running {script} {version} but this client is {UCS.Common.Protocol.Version}. " +
+                    "Restart DCS to load the updated scripts (if it persists, run the installer again).");
     }
 
     public void Dispose()

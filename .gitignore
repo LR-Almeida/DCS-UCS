@@ -19,6 +19,9 @@ UCS-AutoConnect.cfg
 # Generated aircraft profiles are local only (see CONTRIBUTING.md)
 profiles/*.json
 
+# Local test session logs (dcs.log, client/server logs) - may contain personal data
+test-logs/
+
 # IDE / OS
 .vs/
 .vscode/

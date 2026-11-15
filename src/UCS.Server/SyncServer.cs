@@ -15,6 +15,7 @@ internal sealed class ConnectedClient
     public string Aircraft { get; set; } = "";
     public string ModVersion { get; set; } = "";
     public string ProfileHash { get; set; } = "";
+    public int ArgsFormat { get; set; } = 1;
     public bool Standby { get; set; } = true;
     public long LastSeen { get; set; }
     public long JoinedAt { get; init; }
@@ -31,12 +32,13 @@ internal sealed class ConnectedClient
     /// <summary>Same mod version and same profile mapping: only then commands are relayed.</summary>
     public bool Compatible(ConnectedClient other) =>
         string.Equals(ModVersion, other.ModVersion, StringComparison.Ordinal) &&
-        string.Equals(ProfileHash, other.ProfileHash, StringComparison.Ordinal);
+        string.Equals(ProfileHash, other.ProfileHash, StringComparison.Ordinal) &&
+        ArgsFormat == other.ArgsFormat;
 
     /// <summary>Crew members that can exchange cockpit commands.</summary>
     public bool CanSyncWith(ConnectedClient other) => other != this && other.Eligible && SameCockpit(other) && Compatible(other);
 
-    public PeerInfo ToPeerInfo() => new() { Name = Name, ModVersion = ModVersion, ProfileHash = ProfileHash };
+    public PeerInfo ToPeerInfo() => new() { Name = Name, ModVersion = ModVersion, ProfileHash = ProfileHash, UcsVersion = Version, ArgsFormat = ArgsFormat };
 }
 
 /// <summary>
@@ -65,7 +67,8 @@ internal sealed class SyncServer
         _udp = UdpHelper.Create(new IPEndPoint(bindIp, _cfg.Port));
         Log("INFO", $"UCS-Server {Protocol.Version} listening on udp://{bindIp}:{_cfg.Port} " +
                     $"(session match: {_cfg.SessionMatch}, timeout: {_cfg.TimeoutSeconds}s)");
-        Log("INFO", "Remember to allow this UDP port in the Windows Firewall / router (port forward) for remote players.");
+        _ = AnnounceAddressesAsync(ct);
+        _ = UpdateNoticeLoopAsync(ct);
 
         var maintenance = MaintenanceLoopAsync(ct);
         try
@@ -104,6 +107,70 @@ internal sealed class SyncServer
             _udp.Dispose();
             try { await maintenance.ConfigureAwait(false); } catch (OperationCanceledException) { }
             Log("INFO", "Server stopped.");
+        }
+    }
+
+    /// <summary>Prints the addresses to give to players (runs in background, never delays startup).</summary>
+    private async Task AnnounceAddressesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var port = _cfg.Port;
+            var local = NetworkInfo.LocalAddresses();
+            foreach (var a in local.Where(a => a.VpnName != "virtual machine"))
+                Log("INFO", $"Local address:  {a.Ip}:{port}   ({a.Describe()})");
+            var routerTarget = local.FirstOrDefault(a => a.IsRouterLan)?.Ip;
+
+            if (!_cfg.DetectPublicIp)
+            {
+                Log("INFO", "Public IP detection disabled (DetectPublicIp = false).");
+                return;
+            }
+            var pub = await NetworkInfo.DetectPublicIpAsync(ct).ConfigureAwait(false);
+            if (pub == null)
+            {
+                Log("WARN", "Could not detect the public IP (no internet or service blocked). Check it at https://api.ipify.org");
+                return;
+            }
+            PublicAddress = $"{pub}:{port}";
+            Log("INFO", $"PUBLIC address: {PublicAddress}   <- give this to players over the internet");
+            Log("INFO", $"Internet players need UDP {port} open in the Windows Firewall and forwarded on your router" +
+                        (routerTarget != null ? $" to {routerTarget}." : "."));
+            Log("INFO", "If it still fails, your ISP may use CGNAT (no public IP of your own) - use a VPN such as Tailscale/ZeroTier/Radmin.");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log("WARN", "Address detection failed: " + ex.Message);
+        }
+    }
+
+    public string? PublicAddress { get; private set; }
+
+    private static readonly List<string> ServerFeatures = new() { Protocol.Features.ModCheck, Protocol.Features.UcsVersionCheck };
+
+    /// <summary>Tells the admin when a newer UCS-Server is published (never updates by itself).</summary>
+    private async Task UpdateNoticeLoopAsync(CancellationToken ct)
+    {
+        if (!_cfg.CheckForUpdates) return;
+        var current = SemVersion.Parse(Protocol.Version);
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var newer = await GitHubReleases.FindNewerAsync("DCS-UCS-Server", current, current.IsPreRelease, ct).ConfigureAwait(false);
+                if (newer != null)
+                    Log("UPDATE", $"UCS-Server {newer.Version} is available (running {Protocol.Version}): {newer.HtmlUrl}");
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                if (_cfg.Verbose) Log("DEBUG", "Update check failed: " + ex.Message);
+            }
+            try { await Task.Delay(TimeSpan.FromHours(12), ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
         }
     }
 
@@ -166,19 +233,21 @@ internal sealed class SyncServer
             var oldAircraft = client.Aircraft;
             var oldVersion = client.ModVersion;
             var oldHash = client.ProfileHash;
+            var oldFormat = client.ArgsFormat;
 
             client.EndPoint = from;
             client.LastSeen = NowMs;
             client.Name = Clean(msg.Name, 32) is { Length: > 0 } n ? n : "Pilot";
-            client.Version = Clean(msg.Version, 16);
+            client.Version = Clean(msg.Version, 24);
             client.SessionKey = key;
             client.Aircraft = aircraft;
             client.Standby = standby;
             client.ModVersion = Clean(msg.ModVersion, 32);
             client.ProfileHash = Clean(msg.ProfileHash, 32);
+            client.ArgsFormat = msg.ArgsFormat is > 0 ? msg.ArgsFormat.Value : 1; // old clients: 1
 
             var changed = oldKey != key || !string.Equals(oldAircraft, aircraft, StringComparison.OrdinalIgnoreCase) ||
-                          oldVersion != client.ModVersion || oldHash != client.ProfileHash;
+                          oldVersion != client.ModVersion || oldHash != client.ProfileHash || oldFormat != client.ArgsFormat;
             becameEligible = client.Eligible && (!wasEligible || changed);
 
             if (changed || wasEligible != client.Eligible)
@@ -188,8 +257,8 @@ internal sealed class SyncServer
                                $"profile {(client.ProfileHash.Length > 0 ? client.ProfileHash : "-")} | {(client.Standby ? "Standby" : "Active")}");
                 foreach (var other in _clients.Values.Where(c => c != client && c.Eligible && client.Eligible && c.SameCockpit(client) && !c.Compatible(client)))
                 {
-                    Log("MISMATCH", $"{client.Name} (mod {client.ModVersion}, {client.ProfileHash}) vs {other.Name} " +
-                                    $"(mod {other.ModVersion}, {other.ProfileHash}) - not synced");
+                    Log("MISMATCH", $"{client.Name} (UCS {client.Version}, mod {client.ModVersion}, {client.ProfileHash}) vs {other.Name} " +
+                                    $"(UCS {other.Version}, mod {other.ModVersion}, {other.ProfileHash}) - not synced");
                 }
             }
 
@@ -215,11 +284,14 @@ internal sealed class SyncServer
     {
         List<string> names;
         List<PeerInfo> incompatible;
+        List<PeerInfo> crew;
         lock (_lock)
         {
-            names = client.Eligible
-                ? _clients.Values.Where(c => client.CanSyncWith(c)).Select(c => c.Name).ToList()
-                : new List<string>();
+            var synced = client.Eligible
+                ? _clients.Values.Where(c => client.CanSyncWith(c)).ToList()
+                : new List<ConnectedClient>();
+            names = synced.Select(c => c.Name).ToList();
+            crew = synced.Select(c => c.ToPeerInfo()).ToList();
             incompatible = client.Eligible
                 ? _clients.Values.Where(c => c != client && c.Eligible && c.SameCockpit(client) && !c.Compatible(client))
                     .Select(c => c.ToPeerInfo()).ToList()
@@ -234,6 +306,10 @@ internal sealed class SyncServer
             Peers = names.Count,
             PeerNames = names,
             Incompatible = incompatible.Count > 0 ? incompatible : null,
+            Protocol = UCS.Common.Protocol.Level,
+            ArgsFormat = UCS.Common.Protocol.ArgsFormat,
+            Features = ServerFeatures,
+            Crew = crew,
         }, client.EndPoint);
     }
 
@@ -317,6 +393,7 @@ internal sealed class SyncServer
     {
         lock (_lock)
         {
+            if (PublicAddress != null) Log("STATUS", $"Public address: {PublicAddress}");
             Log("STATUS", $"{_clients.Count} client(s), packets in/out: {Interlocked.Read(ref _packetsIn)}/{Interlocked.Read(ref _packetsOut)}");
             foreach (var g in _clients.Values.Where(c => c.SessionKey.Length > 0).GroupBy(c => c.SessionKey + " | " + c.Aircraft))
             {
