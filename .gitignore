@@ -1,0 +1,29 @@
+# Build output
+bin/
+obj/
+publish/
+installer/Output/
+[Dd]ebug/
+[Rr]elease/
+*.exe
+*.dll
+*.pdb
+*.zip
+
+# Local configuration (IPs, rooms, personal settings)
+client_config.json
+server_config.json
+UCS-AutoConnect.cfg
+!Server-Files/UCS-AutoConnect.cfg
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.swp
+*.DotSettings.user
+Thumbs.db
+.DS_Store
+*.log
