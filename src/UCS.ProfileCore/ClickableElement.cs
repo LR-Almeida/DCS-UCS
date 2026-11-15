@@ -1,11 +1,11 @@
 using System.Text.RegularExpressions;
 
-namespace UCS.ProfileGen;
+namespace UCS.ProfileCore;
 
 /// <summary>A clickable cockpit element extracted from clickabledata.lua.</summary>
-internal sealed record ClickableElement(string Key, string Hint, int DeviceId, int CommandId, int ArgId, string Kind);
+public sealed record ClickableElement(string Key, string Hint, int DeviceId, int CommandId, int ArgId, string Kind);
 
-internal static partial class ElementKinds
+public static partial class ElementKinds
 {
     public const string Button = "button";
     public const string Toggle = "toggle";

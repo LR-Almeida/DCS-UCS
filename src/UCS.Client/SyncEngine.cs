@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using UCS.Common;
+using UCS.ProfileCore;
 
 namespace UCS.Client;
 
@@ -22,6 +23,10 @@ public sealed record EngineStatus(
     bool Connected,
     string ServerAddress,
     IReadOnlyList<string> Peers,
+    IReadOnlyList<PeerInfo> Incompatible,
+    string ModVersion,
+    string ProfileHash,
+    bool GeneratingProfile,
     long SentArgs,
     long ReceivedArgs);
 
@@ -60,6 +65,10 @@ public sealed class SyncEngine : IDisposable
     private const int ProfileSearchMs = 5000;
     private bool _standbySent;
     private readonly Dictionary<int, double> _localValues = new();
+    private string _modVersion = "";        // installed mod version (or profile's when the mod is not found)
+    private string _profileHash = "";
+    private bool _generating;
+    private readonly HashSet<string> _autoGenTried = new(StringComparer.OrdinalIgnoreCase);
 
     // Server state
     private UdpClient? _serverUdp;
@@ -69,6 +78,7 @@ public sealed class SyncEngine : IDisposable
     private long _lastWelcome = -100000;
     private string _sessionKey = "";
     private List<string> _peers = new();
+    private List<PeerInfo> _incompatible = new();
     private long _seq;
     private long _sentArgs, _receivedArgs;
     private int _connectGeneration;
@@ -128,6 +138,10 @@ public sealed class SyncEngine : IDisposable
                 Connected: _connectRequested && now - _lastWelcome < WelcomeTimeoutMs,
                 ServerAddress: $"{_cfg.ServerHost}:{_cfg.ServerPort}",
                 Peers: _peers.ToList(),
+                Incompatible: _incompatible.ToList(),
+                ModVersion: _modVersion,
+                ProfileHash: _profileHash,
+                GeneratingProfile: _generating,
                 SentArgs: _sentArgs,
                 ReceivedArgs: _receivedArgs);
         }
@@ -212,6 +226,7 @@ public sealed class SyncEngine : IDisposable
             _connectRequested = false;
             _sessionKey = "";
             _peers = new List<string>();
+            _incompatible = new List<PeerInfo>();
         }
         if (udp != null && ep != null && sendLeave)
         {
@@ -266,6 +281,8 @@ public sealed class SyncEngine : IDisposable
                 Room = string.IsNullOrWhiteSpace(_cfg.ManualRoom) ? null : _cfg.ManualRoom.Trim(),
                 Aircraft = _profile != null ? _profileAircraft : EffectiveAircraft,
                 Standby = IsStandby,
+                ModVersion = _profile != null ? _modVersion : null,
+                ProfileHash = _profile != null ? _profileHash : null,
             };
         }
         SendToServer(msg);
@@ -304,6 +321,7 @@ public sealed class SyncEngine : IDisposable
             case Protocol.Welcome:
             {
                 bool first;
+                var incompatibleMsgs = new List<string>();
                 List<string> newPeers = msg.PeerNames ?? new List<string>();
                 string joinedNames = "";
                 lock (_gate)
@@ -316,9 +334,16 @@ public sealed class SyncEngine : IDisposable
                     if (added.Count > 0) joinedNames += "Entrou na cabine: " + string.Join(", ", added) + ". ";
                     if (removed.Count > 0) joinedNames += "Saiu da cabine: " + string.Join(", ", removed) + ".";
                     _peers = newPeers;
+
+                    var inc = msg.Incompatible ?? new List<PeerInfo>();
+                    var oldKeys = _incompatible.Select(i => $"{i.Name}|{i.ModVersion}|{i.ProfileHash}").ToHashSet();
+                    foreach (var i in inc.Where(i => !oldKeys.Contains($"{i.Name}|{i.ModVersion}|{i.ProfileHash}")))
+                        incompatibleMsgs.Add(DescribeIncompatibility(i, _modVersion, _profileHash));
+                    _incompatible = inc;
                 }
                 if (first) Log?.Invoke("Conectado ao servidor UCS.");
                 if (joinedNames.Length > 0) Log?.Invoke(joinedNames.Trim());
+                foreach (var m in incompatibleMsgs) Log?.Invoke("ERRO DE COMPATIBILIDADE: " + m);
                 break;
             }
             case Protocol.Error:
@@ -331,6 +356,16 @@ public sealed class SyncEngine : IDisposable
                 ApplyRemoteArgs(msg);
                 break;
         }
+    }
+
+    /// <summary>Human readable reason why a crew member cannot be synced.</summary>
+    public static string DescribeIncompatibility(PeerInfo peer, string myVersion, string myHash)
+    {
+        static string V(string v) => v.Length > 0 ? v : "sem versão";
+        if (peer.ModVersion != myVersion)
+            return $"{peer.Name} usa o mod versão {V(peer.ModVersion)} e você {V(myVersion)}. Atualizem para a mesma versão.";
+        return $"{peer.Name} tem o mesmo mod ({V(myVersion)}) mas um perfil diferente ({peer.ProfileHash} x {myHash}). " +
+               @"Apaguem o perfil desta aeronave em %APPDATA%\DCS-UCS\profiles para ele ser gerado de novo.";
     }
 
     private void SendSnapshotTo(string targetId, string? name)
@@ -599,29 +634,105 @@ public sealed class SyncEngine : IDisposable
             _lastProfileSearch = Now;
         }
 
+        bool autoGen;
+        lock (_gate) autoGen = _cfg.AutoGenerateProfiles;
+        var mod = ModLocator.Find(aircraft);
         var profile = _profiles.Find(aircraft);
+
         if (profile == null)
         {
             if (!alreadyStandby)
             {
                 Log?.Invoke(_profiles.LastError != null
                     ? $"Perfil inválido para '{aircraft}': {_profiles.LastError}. Standby."
-                    : $"Sem perfil para '{aircraft}' (módulo oficial ou mod sem perfil). Standby.");
+                    : mod == null
+                        ? $"Sem perfil para '{aircraft}' (módulo oficial ou mod não encontrado em Saved Games). Standby."
+                        : $"Sem perfil para '{aircraft}'. Standby.");
             }
             SetStandby();
             lock (_gate) _profileAircraft = aircraft;
+            if (autoGen && mod != null) StartAutoGenerate(mod, "primeira vez nesta aeronave");
             return;
+        }
+
+        // Profile generated for another version of the mod: regenerate it (mod updated)
+        if (mod != null && !string.Equals(mod.Version, profile.ModVersion, StringComparison.Ordinal))
+        {
+            if (autoGen && StartAutoGenerate(mod, $"mod atualizado: perfil {Fmt(profile.ModVersion)} → instalado {Fmt(mod.Version)}"))
+            {
+                SetStandby();
+                lock (_gate) _profileAircraft = aircraft;
+                return;
+            }
+            if (!autoGen)
+                Log?.Invoke($"AVISO: perfil de '{aircraft}' foi gerado para o mod {Fmt(profile.ModVersion)}, mas o instalado é " +
+                            $"{Fmt(mod.Version)}. Gere-o novamente.");
         }
 
         lock (_gate)
         {
             _profile = profile;
             _profileAircraft = aircraft;
+            _modVersion = mod?.Version ?? profile.ModVersion;
+            _profileHash = profile.Fingerprint();
             _localValues.Clear();
         }
-        Log?.Invoke($"Perfil carregado: {profile.AircraftName} ({profile.Args.Count} argumentos).");
+        Log?.Invoke($"Perfil carregado: {profile.AircraftName} ({profile.Args.Count} argumentos, mod {Fmt(_modVersion)}, perfil {_profileHash}).");
         if (exportAlive) SendProfile(profile, aircraft);
         SendState();
+    }
+
+    private static string Fmt(string version) => version.Length > 0 ? version : "sem versão";
+
+    /// <summary>
+    /// Generates the profile in the background from the installed mod (local only, neutral labels).
+    /// Returns false when a generation for this mod version was already attempted.
+    /// </summary>
+    private bool StartAutoGenerate(ModInfo mod, string reason)
+    {
+        var key = $"{mod.Aircraft}|{mod.Version}";
+        lock (_gate)
+        {
+            if (_generating || !_autoGenTried.Add(key)) return false;
+            _generating = true;
+        }
+        Log?.Invoke($"Gerando perfil de '{mod.Aircraft}' a partir do mod {Path.GetFileName(mod.ModDir)} ({reason})...");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                if (mod.ClickablePath == null)
+                {
+                    Log?.Invoke($"O mod {Path.GetFileName(mod.ModDir)} não tem clickabledata.lua legível. Standby.");
+                    return;
+                }
+                var result = ProfileBuilder.Generate(mod.ModDir, mod.Aircraft, new ProfileGenOptions { ClickablePath = mod.ClickablePath });
+                if (result.Profile.Args.Count == 0)
+                {
+                    Log?.Invoke($"Não foi possível gerar o perfil de '{mod.Aircraft}' (nenhum controle encontrado).");
+                    return;
+                }
+                var dir = Path.Combine(AppPaths.UserDir, "profiles");
+                Directory.CreateDirectory(dir);
+                var path = Path.Combine(dir, ProfileBuilder.FileNameFor(mod.Aircraft));
+                result.Profile.Save(path);
+                Log?.Invoke($"Perfil gerado: {result.Profile.Args.Count} controles, mod {Fmt(result.Profile.ModVersion)} ({result.Method}).");
+            }
+            catch (Exception ex)
+            {
+                Log?.Invoke($"Falha ao gerar o perfil de '{mod.Aircraft}': {ex.Message}");
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    _generating = false;
+                    _lastProfileSearch = -100000; // pick the new profile up on the next tick
+                    _standbySent = true;
+                }
+            }
+        });
+        return true;
     }
 
     private void SetStandby()

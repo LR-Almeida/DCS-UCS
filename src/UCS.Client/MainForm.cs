@@ -12,6 +12,7 @@ public sealed class MainForm : Form
     private readonly NumericUpDown _port = new() { Minimum = 1, Maximum = 65535, Width = 80 };
     private readonly CheckBox _autoConnect = new() { Text = "Aceitar Auto-Connect do Servidor DCS", AutoSize = true };
     private readonly CheckBox _connectOnStart = new() { Text = "Conectar ao iniciar", AutoSize = true };
+    private readonly CheckBox _autoProfiles = new() { Text = "Gerar perfis automaticamente a partir dos mods", AutoSize = true };
     private readonly TextBox _room = new() { Width = 220, PlaceholderText = "(vazio = pareamento automático)" };
     private readonly TextBox _pilot = new() { Width = 220, MaxLength = 32 };
     private readonly Button _connect = new() { Text = "Conectar", Width = 110, Height = 30 };
@@ -23,6 +24,7 @@ public sealed class MainForm : Form
     private readonly Label _session = Value();
     private readonly Label _conn = Value();
     private readonly Label _crew = Value();
+    private readonly Label _compat = Value();
     private readonly Label _traffic = Value();
     private readonly ListBox _log = new() { Dock = DockStyle.Fill, HorizontalScrollbar = true, IntegralHeight = false };
     private readonly System.Windows.Forms.Timer _uiTimer = new() { Interval = 300 };
@@ -41,6 +43,7 @@ public sealed class MainForm : Form
         Size = new Size(620, 640);
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
+        _compat.MaximumSize = new Size(440, 0); // wrap long compatibility errors
         BuildLayout();
         LoadConfigToUi(_cfg);
 
@@ -50,6 +53,7 @@ public sealed class MainForm : Form
         _save.Click += (_, _) => SaveConfig(showMessage: true);
         _profilesBtn.Click += (_, _) => OpenProfilesFolder();
         _autoConnect.CheckedChanged += (_, _) => SaveConfig(showMessage: false);
+        _autoProfiles.CheckedChanged += (_, _) => SaveConfig(showMessage: false);
         _uiTimer.Tick += (_, _) => RefreshStatus();
 
         Shown += (_, _) =>
@@ -85,6 +89,7 @@ public sealed class MainForm : Form
         var checks = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true };
         checks.Controls.Add(_autoConnect);
         checks.Controls.Add(_connectOnStart);
+        checks.Controls.Add(_autoProfiles);
         grid.Controls.Add(new Label(), 0, grid.RowCount);
         grid.Controls.Add(checks, 1, grid.RowCount);
         grid.RowCount++;
@@ -108,6 +113,7 @@ public sealed class MainForm : Form
         AddRow(sgrid, "Sessão:", _session);
         AddRow(sgrid, "Conexão:", _conn);
         AddRow(sgrid, "Tripulação:", _crew);
+        AddRow(sgrid, "Compatibilidade:", _compat);
         AddRow(sgrid, "Tráfego:", _traffic);
         status.Controls.Add(sgrid);
         root.Controls.Add(status, 0, 1);
@@ -134,6 +140,7 @@ public sealed class MainForm : Form
         _port.Value = Math.Clamp(c.ServerPort, 1, 65535);
         _autoConnect.Checked = c.AcceptAutoConnect;
         _connectOnStart.Checked = c.ConnectOnStartup;
+        _autoProfiles.Checked = c.AutoGenerateProfiles;
         _room.Text = c.ManualRoom;
         _pilot.Text = c.PilotName;
     }
@@ -153,6 +160,7 @@ public sealed class MainForm : Form
         }
         c.AcceptAutoConnect = _autoConnect.Checked;
         c.ConnectOnStartup = _connectOnStart.Checked;
+        c.AutoGenerateProfiles = _autoProfiles.Checked;
         c.ManualRoom = _room.Text.Trim();
         c.PilotName = string.IsNullOrWhiteSpace(_pilot.Text) ? "Pilot" : _pilot.Text.Trim();
         return c;
@@ -226,7 +234,12 @@ public sealed class MainForm : Form
             SetLabel(_dcs, s.Aircraft.Length > 0 ? $"Standby ({s.Aircraft})" : "Standby", Color.DarkOrange);
         }
 
-        SetLabel(_profile, s.ProfileName != null ? $"{s.ProfileName} ({s.ProfileArgs} args)" : "nenhum", s.ProfileName != null ? Color.Black : Color.DimGray);
+        if (s.GeneratingProfile)
+            SetLabel(_profile, "gerando a partir do mod...", Color.DarkOrange);
+        else if (s.ProfileName != null)
+            SetLabel(_profile, $"{s.ProfileName} ({s.ProfileArgs} args) - mod {(s.ModVersion.Length > 0 ? s.ModVersion : "sem versão")} - perfil {s.ProfileHash}", Color.Black);
+        else
+            SetLabel(_profile, "nenhum", Color.DimGray);
 
         string session;
         if (s.ManualRoom.Length > 0) session = $"Sala manual: {s.ManualRoom}";
@@ -239,6 +252,12 @@ public sealed class MainForm : Form
         else SetLabel(_conn, $"Conectando... ({s.ServerAddress})", Color.DarkOrange);
 
         SetLabel(_crew, s.Peers.Count > 0 ? string.Join(", ", s.Peers) : (s.Connected ? "sozinho na cabine" : "-"), Color.Black);
+        if (s.Incompatible.Count > 0)
+            SetLabel(_compat, "ERRO: " + string.Join(" | ", s.Incompatible.Select(i => SyncEngine.DescribeIncompatibility(i, s.ModVersion, s.ProfileHash))), Color.Firebrick);
+        else if (s.Peers.Count > 0)
+            SetLabel(_compat, "OK - mesma versão do mod e mesmo perfil", Color.ForestGreen);
+        else
+            SetLabel(_compat, "-", Color.DimGray);
         SetLabel(_traffic, $"enviados {s.SentArgs} / recebidos {s.ReceivedArgs}", Color.Black);
 
         _connect.Text = s.ConnectionRequested ? "Desconectar" : "Conectar";

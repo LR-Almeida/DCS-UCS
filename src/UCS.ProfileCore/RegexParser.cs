@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace UCS.ProfileGen;
+namespace UCS.ProfileCore;
 
 /// <summary>
 /// Best-effort text parser used when the Lua evaluation fails. Understands the common
@@ -9,7 +9,7 @@ namespace UCS.ProfileGen;
 ///   device_commands = { Button_1 = counter(); Button_2 = start_command + 2, ... }
 ///   elements["KEY"] = helper(_("Hint"), devices.NAME, device_commands.Button_1, 123, ...)
 /// </summary>
-internal static partial class RegexParser
+public static partial class RegexParser
 {
     [GeneratedRegex(@"devices\s*(?:\[\s*[""'](?<name>\w+)[""']\s*\]|\.(?<name>\w+))\s*=\s*(?<value>counter\s*\(\s*\)|\d+)")]
     private static partial Regex DeviceRegex();

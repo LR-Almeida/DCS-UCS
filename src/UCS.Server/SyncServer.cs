@@ -13,6 +13,8 @@ internal sealed class ConnectedClient
     public required IPEndPoint EndPoint { get; set; }
     public string SessionKey { get; set; } = "";
     public string Aircraft { get; set; } = "";
+    public string ModVersion { get; set; } = "";
+    public string ProfileHash { get; set; } = "";
     public bool Standby { get; set; } = true;
     public long LastSeen { get; set; }
     public long JoinedAt { get; init; }
@@ -25,6 +27,16 @@ internal sealed class ConnectedClient
     public bool SameCockpit(ConnectedClient other) =>
         string.Equals(SessionKey, other.SessionKey, StringComparison.Ordinal) &&
         string.Equals(Aircraft, other.Aircraft, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Same mod version and same profile mapping: only then commands are relayed.</summary>
+    public bool Compatible(ConnectedClient other) =>
+        string.Equals(ModVersion, other.ModVersion, StringComparison.Ordinal) &&
+        string.Equals(ProfileHash, other.ProfileHash, StringComparison.Ordinal);
+
+    /// <summary>Crew members that can exchange cockpit commands.</summary>
+    public bool CanSyncWith(ConnectedClient other) => other != this && other.Eligible && SameCockpit(other) && Compatible(other);
+
+    public PeerInfo ToPeerInfo() => new() { Name = Name, ModVersion = ModVersion, ProfileHash = ProfileHash };
 }
 
 /// <summary>
@@ -152,6 +164,8 @@ internal sealed class SyncServer
             var wasEligible = client.Eligible;
             var oldKey = client.SessionKey;
             var oldAircraft = client.Aircraft;
+            var oldVersion = client.ModVersion;
+            var oldHash = client.ProfileHash;
 
             client.EndPoint = from;
             client.LastSeen = NowMs;
@@ -160,21 +174,30 @@ internal sealed class SyncServer
             client.SessionKey = key;
             client.Aircraft = aircraft;
             client.Standby = standby;
+            client.ModVersion = Clean(msg.ModVersion, 32);
+            client.ProfileHash = Clean(msg.ProfileHash, 32);
 
-            var changed = oldKey != key || !string.Equals(oldAircraft, aircraft, StringComparison.OrdinalIgnoreCase);
+            var changed = oldKey != key || !string.Equals(oldAircraft, aircraft, StringComparison.OrdinalIgnoreCase) ||
+                          oldVersion != client.ModVersion || oldHash != client.ProfileHash;
             becameEligible = client.Eligible && (!wasEligible || changed);
 
             if (changed || wasEligible != client.Eligible)
             {
                 Log("SESSION", $"{client.Name}: {(key.Length > 0 ? key : "<unpaired>")} | " +
-                               $"{(aircraft.Length > 0 ? aircraft : "-")} | {(client.Standby ? "Standby" : "Active")}");
+                               $"{(aircraft.Length > 0 ? aircraft : "-")} | mod {(client.ModVersion.Length > 0 ? client.ModVersion : "?")} | " +
+                               $"profile {(client.ProfileHash.Length > 0 ? client.ProfileHash : "-")} | {(client.Standby ? "Standby" : "Active")}");
+                foreach (var other in _clients.Values.Where(c => c != client && c.Eligible && client.Eligible && c.SameCockpit(client) && !c.Compatible(client)))
+                {
+                    Log("MISMATCH", $"{client.Name} (mod {client.ModVersion}, {client.ProfileHash}) vs {other.Name} " +
+                                    $"(mod {other.ModVersion}, {other.ProfileHash}) - not synced");
+                }
             }
 
             if (becameEligible)
             {
                 // Oldest crew member in the cockpit sends the full cockpit state to the newcomer
                 notifyTarget = _clients.Values
-                    .Where(c => c != client && c.Eligible && c.SameCockpit(client))
+                    .Where(c => client.CanSyncWith(c))
                     .OrderBy(c => c.JoinedAt)
                     .FirstOrDefault();
             }
@@ -191,11 +214,16 @@ internal sealed class SyncServer
     private void SendWelcome(ConnectedClient client)
     {
         List<string> names;
+        List<PeerInfo> incompatible;
         lock (_lock)
         {
             names = client.Eligible
-                ? _clients.Values.Where(c => c != client && c.Eligible && c.SameCockpit(client)).Select(c => c.Name).ToList()
+                ? _clients.Values.Where(c => client.CanSyncWith(c)).Select(c => c.Name).ToList()
                 : new List<string>();
+            incompatible = client.Eligible
+                ? _clients.Values.Where(c => c != client && c.Eligible && c.SameCockpit(client) && !c.Compatible(client))
+                    .Select(c => c.ToPeerInfo()).ToList()
+                : new List<PeerInfo>();
         }
         Send(new UcsMessage
         {
@@ -205,6 +233,7 @@ internal sealed class SyncServer
             SessionKey = client.SessionKey,
             Peers = names.Count,
             PeerNames = names,
+            Incompatible = incompatible.Count > 0 ? incompatible : null,
         }, client.EndPoint);
     }
 
@@ -229,7 +258,7 @@ internal sealed class SyncServer
             }
             if (++sender.RateCount > _cfg.MaxPacketsPerSecond) return;
 
-            var query = _clients.Values.Where(c => c != sender && c.Eligible && c.SameCockpit(sender));
+            var query = _clients.Values.Where(c => sender.CanSyncWith(c));
             if (!string.IsNullOrEmpty(msg.Target)) query = query.Where(c => c.Id == msg.Target);
             targets = query.Select(c => c.EndPoint).ToList();
         }
@@ -291,7 +320,7 @@ internal sealed class SyncServer
             Log("STATUS", $"{_clients.Count} client(s), packets in/out: {Interlocked.Read(ref _packetsIn)}/{Interlocked.Read(ref _packetsOut)}");
             foreach (var g in _clients.Values.Where(c => c.SessionKey.Length > 0).GroupBy(c => c.SessionKey + " | " + c.Aircraft))
             {
-                Log("STATUS", $"  {g.Key}: {string.Join(", ", g.Select(c => c.Name + (c.Standby ? " (standby)" : "")))}");
+                Log("STATUS", $"  {g.Key}: {string.Join(", ", g.Select(c => $"{c.Name} [mod {c.ModVersion}/{c.ProfileHash}]" + (c.Standby ? " (standby)" : "")))}");
             }
         }
     }

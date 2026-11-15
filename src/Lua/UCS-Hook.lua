@@ -10,7 +10,7 @@
 -- =============================================================================
 
 local UCSHook = {
-    version      = "1.0.0",
+    version      = "0.1.0-alpha",
     clientHost   = "127.0.0.1",
     clientPort   = 5053,
     prefix       = "UCS_AUTOCONNECT:",

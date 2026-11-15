@@ -30,7 +30,6 @@ for %%P in (UCS.Server UCS.Client UCS.ProfileGen) do (
 )
 
 REM Portable package layout next to the executables
-xcopy /y /i /q "profiles\*.json" "publish\profiles\" >nul
 xcopy /y /i /q "src\Lua\UCS-Hook.lua" "publish\Lua\" >nul
 xcopy /y /i /q "src\Lua\UCS-Export.lua" "publish\Lua\" >nul
 xcopy /y /i /q "src\Lua\UCS-ServerHook.lua" "publish\Server-Files\" >nul

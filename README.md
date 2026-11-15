@@ -6,6 +6,8 @@
 
 **Free, open-source and decentralized multicrew cockpit synchronization for DCS World community mods.**
 
+> ⚠️ **Alpha** — under active testing. See [Releases](https://github.com/LR-Almeida/DCS-UCS/releases) and report issues.
+
 Many great community aircraft (helicopters, transports, trainers…) have no native multicrew.
 DCS-UCS mirrors cockpit switches, buttons and knobs between crew members — in the spirit of
 SRS and YourControls. There is no central service: every server admin or virtual squadron
@@ -21,7 +23,8 @@ hosts its own lightweight `UCS-Server.exe`.
 - **Safe with official modules** — automatic *Standby* when you are in the menu, in an ED module or in any aircraft without a profile, so it never interferes with ED's native multicrew.
 - **Loop prevention** — remote commands lock the argument for 0.3 s, so switches never bounce back and forth.
 - **Late join sync** — a crew member joining a running cockpit receives its full state.
-- **Profile generator** — `UCS-ProfileGen.exe` reads a mod's `clickabledata.lua` / `devices.lua` and builds the profile for you.
+- **Local, automatic profiles** — the client builds each aircraft profile on your own PC from the mod you installed, and rebuilds it when the mod is updated. No profiles are distributed.
+- **Version check** — crew members only sync when they run the **same mod version and profile**; otherwise the client shows a compatibility error.
 - **Plays nice with other mods** — `Export.lua` callbacks are chained; SRS, Tacview, DCS-BIOS keep working.
 
 ## Components
@@ -30,7 +33,7 @@ hosts its own lightweight `UCS-Server.exe`.
 |---|---|---|
 | `UCS-Client.exe` | Every crew member | GUI; links DCS to the UCS server and loads aircraft profiles |
 | `UCS-Server.exe` | Anyone (squadron / server admin) | UDP relay on port `5055` |
-| `UCS-ProfileGen.exe` | Profile authors | Generates `profiles/<aircraft>.json` from a mod folder |
+| `UCS-ProfileGen.exe` | Troubleshooting | Generates a profile manually (the client already does it automatically) |
 | `UCS-Hook.lua` | `Saved Games\DCS\Scripts\Hooks\` | Slot detection + auto-connect interception (GameGUI) |
 | `UCS-Export.lua` | `Saved Games\DCS\Scripts\UCS\` | Reads/writes cockpit arguments at 20 Hz |
 | `UCS-ServerHook.lua` *(optional)* | DCS server `Scripts\Hooks\` | Sends the UCS server address to joining players |
@@ -51,7 +54,9 @@ See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the wire protocol.
 2. Run it and keep **"Configure DCS World client"** checked. The installer:
    - copies `UCS-Hook.lua` to `Saved Games\DCS\Scripts\Hooks\` (and `DCS.openbeta` if present);
    - copies `UCS-Export.lua` to `Saved Games\DCS\Scripts\UCS\`;
-   - appends one protected line to your `Export.lua` (a backup `Export.lua.ucs-backup` is created):
+   - **appends** one protected line to the end of your existing `Export.lua` — the file is never replaced,
+     the rest of it is kept byte for byte, and other tools (SRS, Tacview, DCS-BIOS, TheWay…) keep working.
+     A backup `Export.lua.ucs-backup` is created first, and the uninstaller removes only this line:
      ```lua
      pcall(function() local ucsLfs=require('lfs'); dofile(ucsLfs.writedir()..[[Scripts\UCS\UCS-Export.lua]]); end) -- DCS-UCS
      ```
@@ -125,42 +130,54 @@ On the machine that hosts the **DCS server**:
 
 ## Profiles
 
-A profile maps each cockpit argument to the clickable command that reproduces it:
+A profile maps each cockpit argument of a mod to the clickable command that reproduces it. DCS-UCS
+**does not ship profiles**: they are generated locally from the mod installed on your PC
+(see [CONTRIBUTING.md](CONTRIBUTING.md) for the policy).
+
+**Automatic (default):** the first time you enter a mod aircraft, `UCS-Client.exe` finds the mod in
+`Saved Games\DCS\Mods\aircraft` (by the `make_flyable(...)` declaration in its `entry.lua`), generates the
+profile and saves it to `%APPDATA%\DCS-UCS\profiles\`. When the mod's `version` changes, the profile is
+regenerated. Official ED modules are never read — UCS stays in Standby on them.
+The option *"Gerar perfis automaticamente a partir dos mods"* turns this off.
 
 ```json
 {
   "aircraft_name": "UH-60L",
+  "mod_version": "2.1.5",
   "args": {
-    "17": { "device_id": 1, "command_id": 3001, "description": "Battery Switch", "type": "toggle" }
+    "17": { "device_id": 30, "command_id": 3013, "description": "toggle 17", "type": "toggle" }
   }
 }
 ```
 
-`aircraft_name` and the file name must match the aircraft type DCS reports (`LoGetSelfData().Name`).
-Profiles are searched in `%APPDATA%\DCS-UCS\profiles\`, then `profiles\` next to `UCS-Client.exe`.
+Descriptions are neutral labels (`toggle 17`): no text from the mod is copied into the profile.
 
-> ⚠️ `profiles/UH-60L.json` in this repository is an **illustrative example**. Argument, device and command
-> ids differ between mods and mod versions — regenerate it from your installed mod before flying.
+### Version and profile compatibility
 
-### Generating a profile for a new mod
+Every client sends the mod version and a short **fingerprint** of its profile (hash of the
+argument → device/command mapping). The server only relays commands between crew members whose version
+**and** fingerprint match. If they differ, nothing is synced and the client shows, for example:
 
-```bat
-UCS-ProfileGen.exe "C:\Users\<you>\Saved Games\DCS\Mods\aircraft\UH-60L" "UH-60L"
+```
+Compatibilidade: ERRO: Copilot usa o mod versão 2.1.4 e você 2.1.5. Atualizem para a mesma versão.
 ```
 
-The tool:
+Mods that do not declare a version are compared by fingerprint only.
 
-1. finds `Cockpit\Scripts\clickabledata.lua` and `devices.lua` inside the mod;
-2. executes them in a **sandboxed Lua interpreter** (MoonSharp, no file/OS access) emulating the DCS cockpit
-   environment — so `devices.lua`, `command_defs.lua` and `counter()` resolve to real numbers. When your DCS
-   install is detected (registry or `--dcs`), ED's common `clickable_defs.lua` is used too;
-3. falls back to a text parser if the scripts cannot be executed;
-4. filters continuous flight controls (cyclic, collective, pedals, throttles, brakes…);
-5. writes `profiles\<aircraft>.json`.
+### Manual generation (troubleshooting)
+
+```bat
+UCS-ProfileGen.exe --list                     :: aircraft declared by installed mods
+UCS-ProfileGen.exe "UH-60L"                   :: find the mod automatically
+UCS-ProfileGen.exe "D:\Mods\aircraft\uh60l" "UH-60L"
+```
+
+The generator executes the mod's `clickabledata.lua` / `devices.lua` / `command_defs.lua` in a
+**sandboxed Lua interpreter** (MoonSharp, no file/OS access) emulating the DCS cockpit environment, falls
+back to a text parser if needed, and filters continuous flight controls (cyclic, collective, pedals,
+throttles, brakes…).
 
 Options: `--out <dir|file.json>`, `--dcs <DCS folder>`, `--no-axes`, `--keep-flight-axes`, `--text-parser`, `--verbose`.
-
-Please share working profiles through a pull request!
 
 ---
 
@@ -200,10 +217,11 @@ DCS-UCS/
 | Symptom | Check |
 |---|---|
 | DCS stays `Standby (DCS não detectado)` | `Export.lua` line present? Look for `UCS` in `Saved Games\DCS\Logs\dcs.log` |
-| `Sem perfil para 'X'` | Generate a profile named exactly `X.json` |
+| `Sem perfil para 'X'` | Is the mod in `Saved Games\DCS\Mods\aircraft`? Check with `UCS-ProfileGen.exe --list` |
 | `Conectando...` forever | Server running? UDP 5055 open in firewall/router? |
 | Crew not paired | Same DCS server, same unit (or `SessionMatch: Group`, or the same manual room) |
-| Switch moves but systems don't react | Regenerate the profile; some mods need different command ids |
+| `ERRO DE COMPATIBILIDADE` | Crew must use the same mod version; if equal, delete the profile in `%APPDATA%\DCS-UCS\profiles` on both PCs |
+| Switch moves but systems don't react | Open an issue (mod, version, argument id); some mods need generator fixes |
 | Server blocks `LoGetSelfData` (export restrictions) | UCS uses the aircraft type reported by the GameGUI hook instead |
 
 ## License

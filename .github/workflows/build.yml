@@ -31,7 +31,7 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart('v') } else { $v = "1.0.0" }
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart('v') } else { $v = "0.1.0-alpha" }
           "value=$v" >> $env:GITHUB_OUTPUT
 
       - name: Publish executables
@@ -45,8 +45,7 @@ jobs:
               -p:Version=${{ steps.version.outputs.value }} -o publish
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          New-Item -ItemType Directory -Force publish/profiles, publish/Lua, publish/Server-Files | Out-Null
-          Copy-Item profiles/*.json publish/profiles/
+          New-Item -ItemType Directory -Force publish/Lua, publish/Server-Files | Out-Null
           Copy-Item src/Lua/UCS-Hook.lua, src/Lua/UCS-Export.lua publish/Lua/
           Copy-Item src/Lua/UCS-ServerHook.lua, Server-Files/UCS-AutoConnect.cfg publish/Server-Files/
           Copy-Item README.md, LICENSE publish/
@@ -94,6 +93,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body_path: .github/RELEASE_NOTES.md
           files: |
             publish/UCS-Client.exe
             publish/UCS-Server.exe

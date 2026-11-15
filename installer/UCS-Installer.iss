@@ -7,7 +7,7 @@
 #define AppName "DCS-UCS"
 #define AppFullName "DCS-UCS (Universal Control Sync)"
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "0.1.0-alpha"
 #endif
 #define AppPublisher "DCS-UCS contributors"
 #define AppURL "https://github.com/LR-Almeida/DCS-UCS"
@@ -51,7 +51,6 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\publish\UCS-Client.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\UCS-Server.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\publish\UCS-ProfileGen.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\profiles\*.json"; DestDir: "{app}\profiles"; Flags: ignoreversion
 Source: "..\src\Lua\UCS-Hook.lua"; DestDir: "{app}\Lua"; Flags: ignoreversion
 Source: "..\src\Lua\UCS-Export.lua"; DestDir: "{app}\Lua"; Flags: ignoreversion
 Source: "..\src\Lua\UCS-ServerHook.lua"; DestDir: "{app}\Server-Files"; Flags: ignoreversion
@@ -98,48 +97,60 @@ end;
 
 { ---------------------------------------------------------------- Export.lua }
 
+{ Export.lua is shared with other tools (SRS, Tacview, DCS-BIOS...). It is never replaced:
+  one line is appended at the end, and the rest of the file is kept byte for byte. }
 procedure InjectExport(const FileName: String);
 var
-  Lines: TArrayOfString;
-  I: Integer;
-  Found: Boolean;
+  Raw: AnsiString;
 begin
-  Found := False;
   if FileExists(FileName) then
   begin
-    if LoadStringsFromFile(FileName, Lines) then
-      for I := 0 to GetArrayLength(Lines) - 1 do
-        if Pos('UCS-Export.lua', Lines[I]) > 0 then
-          Found := True;
-    if not Found then
-      FileCopy(FileName, FileName + '.ucs-backup', False);
+    if not LoadStringFromFile(FileName, Raw) then
+    begin
+      Log('Could not read ' + FileName + ' - Export.lua left untouched');
+      Exit;
+    end;
+    if Pos('UCS-Export.lua', String(Raw)) > 0 then
+    begin
+      Log('Export.lua already loads UCS: ' + FileName);
+      Exit;
+    end;
+    FileCopy(FileName, FileName + '.ucs-backup', False);
   end;
-  if not Found then
-  begin
-    if SaveStringToFile(FileName, #13#10 + UCS_EXPORT_LINE + #13#10, True) then
-      Log('Export.lua injected: ' + FileName)
-    else
-      Log('Could not write ' + FileName);
-  end;
+  if SaveStringToFile(FileName, #13#10 + UCS_EXPORT_LINE + #13#10, True) then
+    Log('Export.lua: UCS line appended to ' + FileName)
+  else
+    Log('Could not write ' + FileName);
 end;
 
+{ Removes only the UCS line; everything else stays exactly as it was. }
 procedure RemoveExportLine(const FileName: String);
 var
-  Lines, Kept: TArrayOfString;
-  I, N: Integer;
+  Raw: AnsiString;
+  Text, Block: String;
+  Count: Integer;
 begin
   if not FileExists(FileName) then Exit;
-  if not LoadStringsFromFile(FileName, Lines) then Exit;
-  N := 0;
-  SetArrayLength(Kept, GetArrayLength(Lines));
-  for I := 0 to GetArrayLength(Lines) - 1 do
-    if Pos('UCS-Export.lua', Lines[I]) = 0 then
-    begin
-      Kept[N] := Lines[I];
-      N := N + 1;
-    end;
-  SetArrayLength(Kept, N);
-  SaveStringsToFile(FileName, Kept, False);
+  if not LoadStringFromFile(FileName, Raw) then Exit;
+  Text := String(Raw);
+  Block := #13#10 + UCS_EXPORT_LINE + #13#10;
+  Count := 0;
+  { Our line is still the last one (the usual case): cut exactly what the installer appended }
+  if (Length(Text) >= Length(Block)) and (Copy(Text, Length(Text) - Length(Block) + 1, Length(Block)) = Block) then
+  begin
+    SetLength(Text, Length(Text) - Length(Block));
+    Count := 1;
+  end;
+  { Lines were added after ours: remove only our line, keep the line break between neighbours }
+  if Count = 0 then Count := StringChangeEx(Text, Block, #13#10, True);
+  if Count = 0 then Count := StringChangeEx(Text, #13#10 + UCS_EXPORT_LINE, '', True);
+  if Count = 0 then Count := StringChangeEx(Text, UCS_EXPORT_LINE + #13#10, '', True);
+  if Count = 0 then Count := StringChangeEx(Text, UCS_EXPORT_LINE, '', True);
+  if Count > 0 then
+  begin
+    FileCopy(FileName, FileName + '.ucs-uninstall-backup', False);
+    SaveStringToFile(FileName, AnsiString(Text), False);
+  end;
 end;
 
 { ---------------------------------------------------------------- client }

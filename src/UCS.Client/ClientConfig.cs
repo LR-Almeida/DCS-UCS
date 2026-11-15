@@ -11,6 +11,8 @@ public sealed class ClientConfig
     public string ManualRoom { get; set; } = "";
     public string PilotName { get; set; } = "Pilot";
     public bool ConnectOnStartup { get; set; } = false;
+    /// <summary>Generate missing/outdated profiles locally from the installed mod.</summary>
+    public bool AutoGenerateProfiles { get; set; } = true;
 
     private static readonly JsonSerializerOptions Options = new()
     {

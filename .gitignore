@@ -16,6 +16,9 @@ server_config.json
 UCS-AutoConnect.cfg
 !Server-Files/UCS-AutoConnect.cfg
 
+# Generated aircraft profiles are local only (see CONTRIBUTING.md)
+profiles/*.json
+
 # IDE / OS
 .vs/
 .vscode/

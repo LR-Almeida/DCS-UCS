@@ -47,13 +47,14 @@ DCS server (player id 0/1) so other players cannot redirect you.
 
 | Type | Direction | Fields |
 |---|---|---|
-| `state` | C → S, every 2 s and on change | `client_id, name, version, server, group, unit, room, aircraft, standby` |
-| `welcome` | S → C, answer to `state` | `session_key, peers, peer_names` |
+| `state` | C → S, every 2 s and on change | `client_id, name, version, server, group, unit, room, aircraft, standby, mod_version, profile_hash` |
+| `welcome` | S → C, answer to `state` | `session_key, peers, peer_names, incompatible[{name, mod_version, profile_hash}]` |
 | `args` | C → S → C | `client_id, aircraft, seq, values{"arg":value}`, optional `target` |
-| `peer_joined` | S → oldest crew member | `client_id, name` → that client sends a targeted `args` snapshot |
+| `peer_joined` | S → oldest compatible crew member | `client_id, name` → that client sends a targeted `args` snapshot |
 | `leave` | C → S | `client_id` |
 | `error` | S → C | `message` |
 
 `SessionKey = "{server}|{group}|{unit}"` (or `"{server}|{group}"` with `"SessionMatch": "Group"`,
 or `"ROOM|{room}"` with a manual room). Packets are relayed only between clients with the same
-key **and** the same aircraft, not in standby, seen in the last 15 s.
+key **and** the same aircraft, the same `mod_version` and `profile_hash`, not in standby, seen in the last 15 s.
+Crew members in the same cockpit with a different version or profile are reported in `incompatible`.

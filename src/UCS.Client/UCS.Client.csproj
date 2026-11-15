@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\UCS.Common\UCS.Common.csproj" />
+    <ProjectReference Include="..\UCS.ProfileCore\UCS.ProfileCore.csproj" />
   </ItemGroup>
 </Project>

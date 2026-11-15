@@ -10,6 +10,8 @@ namespace UCS.Common;
 public sealed class AircraftProfile
 {
     public string AircraftName { get; set; } = "";
+    /// <summary>Version declared by the mod's entry.lua when the profile was generated ("" if unknown).</summary>
+    public string ModVersion { get; set; } = "";
     public string? Description { get; set; }
     public string? GeneratedBy { get; set; }
     public string? GeneratedAt { get; set; }
@@ -35,6 +37,18 @@ public sealed class AircraftProfile
         if (string.IsNullOrWhiteSpace(profile.AircraftName))
             profile.AircraftName = Path.GetFileNameWithoutExtension(path);
         return profile;
+    }
+
+    /// <summary>
+    /// Short hash of the arg → device/command mapping. Two crew members can only sync when
+    /// their fingerprints match (same mapping = same mod cockpit). Descriptions are ignored.
+    /// </summary>
+    public string Fingerprint()
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var (arg, a) in Args) sb.Append(arg).Append(':').Append(a.DeviceId).Append(':').Append(a.CommandId).Append(';');
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(sb.ToString()));
+        return Convert.ToHexString(hash, 0, 6).ToLowerInvariant();
     }
 
     public void Save(string path)

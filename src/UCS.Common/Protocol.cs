@@ -9,7 +9,7 @@ namespace UCS.Common;
 /// </summary>
 public static class Protocol
 {
-    public const string Version = "1.0.0";
+    public const string Version = "0.1.0-alpha";
     public const int DefaultServerPort = 5055;
     public const int ExportSendPort = 5051;   // Export.lua -> Client
     public const int ExportListenPort = 5052; // Client -> Export.lua
@@ -61,6 +61,10 @@ public sealed class UcsMessage
     public string? Room { get; set; }
     public string? Aircraft { get; set; }
     public bool? Standby { get; set; }
+    /// <summary>Mod version from entry.lua ("" when the mod does not declare one).</summary>
+    public string? ModVersion { get; set; }
+    /// <summary>AircraftProfile.Fingerprint() of the loaded profile.</summary>
+    public string? ProfileHash { get; set; }
 
     // Argument sync (args)
     public Dictionary<string, double>? Values { get; set; }
@@ -72,5 +76,14 @@ public sealed class UcsMessage
     public string? SessionKey { get; set; }
     public int? Peers { get; set; }
     public List<string>? PeerNames { get; set; }
+    /// <summary>Crew members in the same cockpit that cannot sync (different mod version / profile).</summary>
+    public List<PeerInfo>? Incompatible { get; set; }
     public string? Message { get; set; }
+}
+
+public sealed class PeerInfo
+{
+    public string Name { get; set; } = "";
+    public string ModVersion { get; set; } = "";
+    public string ProfileHash { get; set; } = "";
 }

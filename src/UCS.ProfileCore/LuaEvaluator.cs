@@ -1,7 +1,7 @@
 using System.Text;
 using MoonSharp.Interpreter;
 
-namespace UCS.ProfileGen;
+namespace UCS.ProfileCore;
 
 /// <summary>
 /// Executes the mod's clickabledata.lua (and everything it dofile()s: devices.lua,
@@ -10,7 +10,7 @@ namespace UCS.ProfileGen;
 /// unknown helper functions (default_button, default_2_position_tumb, ...) are recorded
 /// so the element can still be decoded.
 /// </summary>
-internal sealed class LuaEvaluator
+public sealed class LuaEvaluator
 {
     private const string CommonMarker = "__UCS_COMMON__/";
 
