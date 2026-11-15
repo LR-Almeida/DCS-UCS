@@ -31,6 +31,49 @@ The updater needs a newer release to update **to**, so the first real test happe
 - [ ] Client 0.1.0-alpha with UCS-Server 0.1.1+: sync works (old client treated as args format 1)
 - [ ] Crew members on different UCS versions: note in the log, sync still works
 
+## Flight controls (0.1.2-alpha, in DCS)
+
+Turn on **Diagnostic recording** on both PCs, fly a few minutes, then collect
+the whole `Saved Games\DCS\Logs\UCS` folder (diagnostic CSVs + `UCS-Client.log`) from both seats into `test-logs\`.
+
+Automated single-player run on 2026-11-15 (DCS driven through the Roll for Ejection studio hook, a fake crew
+member on the UCS server; logs in `test-logs\2026-11-15-oh6a-sp-automatizado`):
+
+- [x] UCS 0.1.2 hooks load; Export activates on the OH-6A; profile generated (61 controls, 7 flight animations)
+- [x] Diagnostic CSV written to `Logs\UCS` (~45 fps); no flickering args in single player (one source only)
+- [x] Injection moves the OH-6A cockpit stick, pedals and collective exactly to the received positions
+- [x] Auto calibration: pitch 2001 inverted, roll 2002, rudder 2003, collective 2004 inverted (2087 ignored by the mod)
+- [x] In the seat WITH the controls the injected input flies the aircraft (lifted off in single player) -> seat 1 lock
+- [x] Remote switch command applied (intercom switch); repeated command does not invert it (toggle guard)
+- [x] Local switch click reaches the crew; late joiner receives the full cockpit state (61 args)
+- [x] Nothing injected after the stream stops
+
+Automated private multiplayer run on 2026-11-15 (DCS as host of a password-protected, non-public server; fake
+copilot on the UCS server through the LAN address; logs in `test-logs\2026-11-15-oh6a-mp-privado-automatizado`):
+
+- [x] Pairing by DCS server / group / unit (no manual room); late joiner receives the full state (61 args)
+- [x] Export not restricted on the host: `LoGetSelfData`, `get_argument_value`, `LoSetCommand` all work
+- [x] Switch from the crew applied in the host cockpit; host stick input reaches the crew (`flight` messages)
+- [x] Seat 1 lock: crew stick positions are NOT injected in the first seat
+- [x] Leaving the slot: Standby, crew list cleared
+- [x] DCS lists the second seat as slot `<unit>_2` (role "Instructor"); it cannot be taken without a pilot in seat 1
+- Seen: on activation the client logs "Profile loaded" twice and sends STANDBY + profile again (harmless flap)
+
+Still needs two players:
+
+- [ ] Profile regenerated automatically ("N flight-control animations" in the log; OH-6A 7, UH-60L 4)
+- [ ] Baseline (mirror OFF): what the other seat's stick does natively (frozen / own joystick / flicker)
+- [ ] Log tab lists the flickering args reported by the diagnostic (UH-60L doors, cyclic)
+- [ ] UH-60L doors stop flickering once both seats run UCS (doors are clickable and synced)
+- [ ] Mirror ON in the seat NOT flying: stick / pedals / collective follow the pilot, no flicker
+- [ ] Mirror ON in seat 2 without the controls does NOT fly the aircraft (critical)
+- [ ] Hook reports seat 2 for the copilot ("Multicrew seat: 2" in the log); mirror inactive in seat 1
+- [ ] What happens after the copilot takes the controls (C key) with the mirror still ON
+- [ ] Moving the local stick with the mirror ON pauses that axis ("paused 3 s" in the log)
+- [ ] UH-60L calibration (which commands its EFM reads; log lines "uses command ...")
+- [ ] Latency over the internet acceptable (CSV: remote vs local columns)
+- [ ] Server 0.1.1 + client 0.1.2: log says flight controls disabled, switches still sync
+
 ## In DCS (alpha test campaign)
 
 - [ ] OH-6A, single player: profile generated automatically, `Active: OH-6A`, "sent" counter increases

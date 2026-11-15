@@ -17,6 +17,14 @@ public sealed class AircraftProfile
     public string? GeneratedAt { get; set; }
     public string? Source { get; set; }
     public SortedDictionary<int, ProfileArg> Args { get; set; } = new();
+    /// <summary>
+    /// Profile layout. 1 = 0.1.x switches only (missing field). 2 = also lists the flight-control
+    /// animation arguments (<see cref="Flight"/>). Older generated profiles are regenerated.
+    /// </summary>
+    public int Schema { get; set; } = 1;
+    public const int CurrentSchema = 2;
+    /// <summary>Flight-control animation args (stick, pedals, collective...), mirrored from whoever flies.</summary>
+    public List<FlightArg>? Flight { get; set; }
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -65,4 +73,27 @@ public sealed class ProfileArg
     public string Description { get; set; } = "";
     /// <summary>button, toggle, multiposition, axis, unknown (informative only).</summary>
     public string? Type { get; set; }
+}
+
+/// <summary>Axis names used in <see cref="FlightArg.Axis"/>.</summary>
+public static class FlightAxes
+{
+    public const string Pitch = "pitch";
+    public const string Roll = "roll";
+    public const string Yaw = "yaw";
+    public const string Collective = "collective";
+    public const string Throttle = "throttle";
+    /// <summary>Trim indicators, collective throttle twist, idle stop... (display only).</summary>
+    public const string Other = "other";
+}
+
+/// <summary>A cockpit animation argument driven by the flight model (not clickable).</summary>
+public sealed class FlightArg
+{
+    public int Arg { get; set; }
+    /// <summary>pitch, roll, yaw, collective, throttle, other.</summary>
+    public string Axis { get; set; } = FlightAxes.Other;
+    /// <summary>Range of the argument value (gauge output), used to convert to a -1..1 input axis.</summary>
+    public double Min { get; set; } = -1;
+    public double Max { get; set; } = 1;
 }

@@ -10,7 +10,7 @@
 -- =============================================================================
 
 local UCSHook = {
-    version      = "0.1.1-alpha",
+    version      = "0.1.2-alpha",
     clientHost   = "127.0.0.1",
     clientPort   = 5053,
     prefix       = "UCS_AUTOCONNECT:",
@@ -144,6 +144,17 @@ local function getPlayerUnitId()
     return nil
 end
 
+-- Multicrew seat: 1 = first seat (slot "123"), 2 = "123_2"... Single player: 1.
+local function getSeat()
+    local myId = safe(function() return net.get_my_player_id() end)
+    if myId then
+        local slot = safe(function() return net.get_player_info(myId, "slot") end)
+        local n = slot and tonumber(string.match(tostring(slot), "_(%d+)$"))
+        if n then return n end
+    end
+    return 1
+end
+
 local function getPlayerName()
     local myId = safe(function() return net.get_my_player_id() end)
     local name = nil
@@ -154,6 +165,8 @@ local function getPlayerName()
         name = safe(function() return DCS.getPlayerName() end)
     end
     if type(name) ~= "string" then return "" end
+    -- single player reports the placeholder "player": let the client use the nickname instead
+    if string.lower(name) == "player" then return "" end
     return name
 end
 
@@ -167,6 +180,7 @@ local function buildState()
         aircraft   = "",
         in_aircraft = false,
         player     = getPlayerName(),
+        seat       = 1,
     }
     local unitId = getPlayerUnitId()
     if unitId then
@@ -180,12 +194,13 @@ local function buildState()
         state.unit  = unit and tostring(unit) or ""
         state.aircraft = acft and tostring(acft) or ""
         state.in_aircraft = state.unit ~= ""
+        state.seat = getSeat()
     end
     return state
 end
 
 local function stateKey(s)
-    return table.concat({ s.server, s.group, s.unit, s.aircraft, tostring(s.in_aircraft), s.player }, "|")
+    return table.concat({ s.server, s.group, s.unit, s.aircraft, tostring(s.in_aircraft), s.player, tostring(s.seat) }, "|")
 end
 
 local function publishState(force)

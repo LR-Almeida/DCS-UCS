@@ -51,10 +51,21 @@ public sealed class MainForm : Form
     private readonly Label _compat = Value();
     private readonly Label _traffic = Value();
 
+    // Flight controls (experimental)
+    private readonly CheckBox _flSend = new() { Text = "Send my stick / pedals / collective positions to the crew", AutoSize = true };
+    private readonly CheckBox _flInject = new()
+    {
+        Text = "Move my cockpit controls with the pilot's inputs (EXPERIMENTAL - only in the seat NOT flying)",
+        AutoSize = true, ForeColor = Color.DarkRed,
+    };
+    private readonly CheckBox _flDiag = new() { Text = @"Diagnostic recording (Saved Games\DCS\Logs\UCS\UCS-diag-*.csv)", AutoSize = true };
+    private readonly Label _flStatus = Value();
+
     // Log
     private readonly ListBox _log = new() { Dock = DockStyle.Fill, HorizontalScrollbar = true, IntegralHeight = false, SelectionMode = SelectionMode.MultiExtended };
     private readonly TabPage _logTab = new("Log");
     private int _unseenLog;
+    private readonly ClientLogFile _logFile = new();
     private readonly TabControl _tabs = new() { Dock = DockStyle.Fill };
 
     private readonly System.Windows.Forms.Timer _uiTimer = new() { Interval = 300 };
@@ -103,6 +114,28 @@ public sealed class MainForm : Form
         _updates.UpdateFound += r => SafeUi(() => ShowUpdatePrompt(r));
         _updates.ExitRequested += () => SafeUi(Close);
         _chkUpdates.CheckedChanged += (_, _) => SaveConfig(showMessage: false);
+        _flSend.CheckedChanged += (_, _) => { if (!_loadingUi) SaveConfig(showMessage: false); };
+        _flDiag.CheckedChanged += (_, _) => { if (!_loadingUi) SaveConfig(showMessage: false); };
+        _flInject.CheckedChanged += (_, _) =>
+        {
+            if (_loadingUi) return;
+            if (_flInject.Checked && MessageBox.Show(this,
+                    "EXPERIMENTAL TEST FEATURE\n\n" +
+                    "The stick / pedals / collective positions received from the crew are fed into THIS seat as joystick input, " +
+                    "so your cockpit controls move like the pilot's.\n\n" +
+                    "- Use it ONLY in the seat that is NOT flying.\n" +
+                    "- Moving your own controls pauses it for 3 seconds.\n" +
+                    "- Turn it OFF before taking the controls of the aircraft.\n" +
+                    "- It is always off when UCS-Client starts.\n\nEnable it?",
+                    "DCS-UCS - flight input mirror", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            {
+                _loadingUi = true;
+                _flInject.Checked = false;
+                _loadingUi = false;
+                return;
+            }
+            SaveConfig(showMessage: false);
+        };
         _chkPre.CheckedChanged += (_, _) => SaveConfig(showMessage: false);
         _btnCheck.Click += async (_, _) => await _updates.CheckAsync(manual: true);
         _btnUpdNow.Click += async (_, _) => await _updates.UpdateNowAsync();
@@ -123,6 +156,7 @@ public sealed class MainForm : Form
             _uiTimer.Stop();
             SaveConfig(showMessage: false);
             _updates.Dispose();
+            _logFile.Dispose();
             _engine.Dispose();
         };
     }
@@ -172,6 +206,17 @@ public sealed class MainForm : Form
         AddRow(sgrid, "Traffic:", _traffic);
         status.Controls.Add(sgrid);
         root.Controls.Add(status);
+
+        var flight = new GroupBox { Text = "Flight controls (experimental)", Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(10) };
+        var fgrid = NewGrid();
+        var fchecks = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        fchecks.Controls.Add(_flSend);
+        fchecks.Controls.Add(_flInject);
+        fchecks.Controls.Add(_flDiag);
+        AddRow(fgrid, "", fchecks);
+        AddRow(fgrid, "Flight:", _flStatus);
+        flight.Controls.Add(fgrid);
+        root.Controls.Add(flight);
 
         scroll.Controls.Add(root);
         // Tell the panel how big the content is so it always shows scroll bars when needed
@@ -394,8 +439,14 @@ public sealed class MainForm : Form
 
     // ------------------------------------------------------------------ config
 
+    private bool _loadingUi;
+
     private void LoadConfigToUi(ClientConfig c)
     {
+        _loadingUi = true;
+        _flSend.Checked = c.FlightMirrorSend;
+        _flInject.Checked = c.FlightMirrorInject;
+        _flDiag.Checked = c.FlightDiagnostics;
         _host.Text = c.ServerHost;
         _port.Value = Math.Clamp(c.ServerPort, 1, 65535);
         _autoConnect.Checked = c.AcceptAutoConnect;
@@ -407,6 +458,7 @@ public sealed class MainForm : Form
         _pilot.Enabled = !c.AutoDetectPilotName;
         _room.Text = c.ManualRoom;
         _pilot.Text = c.PilotName;
+        _loadingUi = false;
     }
 
     private ClientConfig ReadUi()
@@ -430,6 +482,9 @@ public sealed class MainForm : Form
         c.IncludePreReleases = _chkPre.Checked;
         c.ManualRoom = _room.Text.Trim();
         c.PilotName = string.IsNullOrWhiteSpace(_pilot.Text) ? "Pilot" : _pilot.Text.Trim();
+        c.FlightMirrorSend = _flSend.Checked;
+        c.FlightMirrorInject = _flInject.Checked;
+        c.FlightDiagnostics = _flDiag.Checked;
         return c;
     }
 
@@ -525,6 +580,17 @@ public sealed class MainForm : Form
 
         SetLabel(_traffic, $"sent {s.SentArgs} / received {s.ReceivedArgs}", Color.Black);
 
+        if (s.ProfileName == null)
+            SetLabel(_flStatus, "-", Color.DimGray);
+        else if (s.FlightArgs == 0)
+            SetLabel(_flStatus, "no flight-control animations found in this mod", Color.DimGray);
+        else if (s.Connected && !s.FlightServerSupport)
+            SetLabel(_flStatus, $"{s.FlightArgs} animations - server too old (needs UCS-Server 0.1.2+)", Color.DarkOrange);
+        else
+            SetLabel(_flStatus, $"{s.FlightArgs} animations - seat {s.Seat} - packets sent {s.FlightSent} / received {s.FlightReceived}" +
+                                (s.FlightInjectActive ? " - MIRROR ON" : _flInject.Checked ? " - mirror inactive in seat 1" : ""),
+                     s.FlightInjectActive ? Color.DarkRed : Color.Black);
+
         var detected = _autoPilot.Checked
             ? (s.DetectedPilot.Length > 0 ? $"Using \"{s.DetectedPilot}\" (from DCS)" : "Not detected yet - start DCS (using the name above)")
             : "";
@@ -543,7 +609,9 @@ public sealed class MainForm : Form
 
     private void AddLog(string text)
     {
-        _log.Items.Add($"{DateTime.Now:HH:mm:ss}  {text}");
+        var line = $"{DateTime.Now:HH:mm:ss}  {text}";
+        _log.Items.Add(line);
+        _logFile.Write(line);
         while (_log.Items.Count > 2000) _log.Items.RemoveAt(0);
         _log.TopIndex = Math.Max(0, _log.Items.Count - 1);
         if (_tabs.SelectedTab != _logTab)
@@ -558,6 +626,7 @@ public sealed class MainForm : Form
         using var dlg = new SaveFileDialog
         {
             Filter = "Text file (*.txt)|*.txt",
+            InitialDirectory = _logFile.Directory,
             FileName = $"ucs-client-{DateTime.Now:yyyyMMdd-HHmm}.txt",
         };
         if (dlg.ShowDialog(this) != DialogResult.OK) return;
@@ -612,6 +681,17 @@ QUICK START
 
 4. Flip a switch: it moves in your crew mate's cockpit too.
 
+FLIGHT CONTROLS (EXPERIMENTAL)
+   - "Send my stick / pedals / collective positions": your flight-control positions are sent to
+     the crew (view only). Keep it on.
+   - "Move my cockpit controls with the pilot's inputs": ONLY in the seat that is NOT flying.
+     The pilot's positions are fed into your seat as joystick input so your stick moves like
+     theirs. It never runs in the first seat, finds the right input of each axis by itself
+     (see the Log tab), and moving your own controls pauses it for 3 s. Turn it OFF before
+     taking the controls. It is always off when the client starts.
+   - "Diagnostic recording": writes Saved Games\DCS\Logs\UCS\UCS-diag-*.csv and lists in the Log
+     tab any cockpit animation that flickers. Send the file from both seats with bug reports.
+
 PAIRING
    Players are paired automatically by DCS server + group + unit.
    If that does not work (single player tests, mods where each crew member uses a different
@@ -629,7 +709,8 @@ PROBLEMS?
    - "Standby (DCS not detected)": check that UCS-Export.lua is loaded (look for "UCS" in
      Saved Games\DCS\Logs\dcs.log).
    - "Connecting..." forever: is UCS-Server.exe running? Is UDP 5055 open?
-   - Log tab: copy or save the log and attach it to your bug report.
+   - The log is also saved automatically to Saved Games\DCS\Logs\UCS\UCS-Client.log
+     (previous session: UCS-Client.old.log). Attach it to your bug report.
 """;
 
     private const string AboutText = """

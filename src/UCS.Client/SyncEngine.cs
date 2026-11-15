@@ -31,7 +31,13 @@ public sealed record EngineStatus(
     string PilotName,
     string DetectedPilot,
     long SentArgs,
-    long ReceivedArgs);
+    long ReceivedArgs,
+    int FlightArgs,
+    bool FlightServerSupport,
+    long FlightSent,
+    long FlightReceived,
+    int Seat,
+    bool FlightInjectActive);
 
 /// <summary>
 /// Core of UCS-Client: glues the DCS bridge (Export + Hook) to the UCS-Server
@@ -89,6 +95,14 @@ public sealed class SyncEngine : IDisposable
     private bool _scriptVersionWarned;
     private long _seq;
     private long _sentArgs, _receivedArgs;
+    private long _flightSent, _flightReceived;
+    private bool _flightSupported;
+    private bool _flightWarned;
+    private int _seat = 1;              // multicrew seat reported by the hook (1 = first seat)
+
+    /// <summary>The injection never runs in seat 1: that seat normally has the controls, and there the injected
+    /// input really flies the aircraft.</summary>
+    private bool InjectAllowed(ClientConfig cfg) => cfg.FlightMirrorInject && (_seat > 1 || cfg.FlightInjectAnySeat);
     private int _connectGeneration;
 
     public event Action<string>? Log;
@@ -115,14 +129,31 @@ public sealed class SyncEngine : IDisposable
 
     public void UpdateConfig(ClientConfig cfg)
     {
-        bool roomChanged;
+        bool roomChanged, flightChanged, injectChanged;
         lock (_gate)
         {
             roomChanged = _cfg.ManualRoom != cfg.ManualRoom || _cfg.PilotName != cfg.PilotName ||
                           _cfg.AutoDetectPilotName != cfg.AutoDetectPilotName;
+            injectChanged = _cfg.FlightMirrorInject != cfg.FlightMirrorInject;
+            flightChanged = injectChanged || _cfg.FlightMirrorSend != cfg.FlightMirrorSend ||
+                            _cfg.FlightDiagnostics != cfg.FlightDiagnostics || _cfg.FlightAxisCommands != cfg.FlightAxisCommands;
             _cfg = cfg.Clone();
         }
         if (roomChanged) SendState();
+        if (injectChanged)
+        {
+            bool allowed;
+            int seat;
+            lock (_gate) { allowed = InjectAllowed(_cfg); seat = _seat; }
+            Log?.Invoke(!cfg.FlightMirrorInject
+                ? "Flight input mirror OFF."
+                : allowed
+                    ? "EXPERIMENTAL: flight input mirror ON. The received stick position is fed into THIS seat as joystick input. " +
+                      "Use it only in the seat that is NOT flying; moving your own controls pauses it for 3 s. Turn it off before taking the controls."
+                    : $"Flight input mirror enabled, but it stays INACTIVE in seat {seat} (the first seat has the controls). " +
+                      "It starts when you sit in another seat of a multicrew aircraft.");
+        }
+        if (flightChanged) SendFlightMode();
     }
 
     // ------------------------------------------------------------------ status
@@ -155,7 +186,13 @@ public sealed class SyncEngine : IDisposable
                 PilotName: EffectivePilotName,
                 DetectedPilot: _detectedPilot,
                 SentArgs: _sentArgs,
-                ReceivedArgs: _receivedArgs);
+                ReceivedArgs: _receivedArgs,
+                FlightArgs: _profile?.Flight?.Count ?? 0,
+                FlightServerSupport: _flightSupported,
+                FlightSent: _flightSent,
+                FlightReceived: _flightReceived,
+                Seat: _seat,
+                FlightInjectActive: InjectAllowed(_cfg));
         }
     }
 
@@ -213,6 +250,7 @@ public sealed class SyncEngine : IDisposable
             _lastWelcome = -100000;
             _serverChecked = false;
             _serverVersion = "";
+            _flightSupported = false;
             _peers = new List<string>();
             _ = ServerReceiveLoopAsync(_serverUdp, _serverCts.Token);
         }
@@ -367,6 +405,8 @@ public sealed class SyncEngine : IDisposable
                         _serverChecked = true;
                         _serverVersion = msg.Version ?? "";
                         serverNotes.AddRange(DescribeServerCapabilities(msg));
+                        _flightSupported = (msg.Features ?? UCS.Common.Protocol.Features.Level1.ToList())
+                            .Contains(UCS.Common.Protocol.Features.FlightMirror);
                     }
                     if (msg.Crew != null)
                     {
@@ -392,6 +432,9 @@ public sealed class SyncEngine : IDisposable
                 break;
             case Protocol.Args:
                 ApplyRemoteArgs(msg);
+                break;
+            case Protocol.Flight:
+                ApplyRemoteFlight(msg);
                 break;
         }
     }
@@ -472,6 +515,59 @@ public sealed class SyncEngine : IDisposable
         if (entries.Count > 0) _bridge.SendChunked("SET|", entries);
     }
 
+    /// <summary>Flight-control positions of the crew member flying -> Export (display / experimental injection).</summary>
+    private void ApplyRemoteFlight(UcsMessage msg)
+    {
+        if (msg.Values == null) return;
+        var entries = new List<string>();
+        lock (_gate)
+        {
+            if (IsStandby || _profile?.Flight == null) return;
+            if (!string.Equals(msg.Aircraft, _profileAircraft, StringComparison.OrdinalIgnoreCase)) return;
+            foreach (var (key, val) in msg.Values)
+            {
+                if (!int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out var arg)) continue;
+                if (double.IsNaN(val) || double.IsInfinity(val) || !_profile.Flight.Any(f => f.Arg == arg)) continue;
+                entries.Add($"{arg}={val.ToString("0.####", CultureInfo.InvariantCulture)}");
+            }
+            if (entries.Count > 0) _flightReceived++;
+        }
+        if (entries.Count > 0) _bridge.SendToExport("FSET|" + string.Join(";", entries));
+    }
+
+    /// <summary>Tells the Export which flight args to watch (sent after the profile).</summary>
+    private void SendFlightArgs(AircraftProfile profile)
+    {
+        var list = profile.Flight ?? new List<FlightArg>();
+        static string F(double d) => d.ToString("0.####", CultureInfo.InvariantCulture);
+        _bridge.SendToExport("FLIGHT|" + string.Join(";", list.Select(f => $"{f.Arg}:{f.Axis}:{F(f.Min)}:{F(f.Max)}")));
+        SendFlightMode();
+    }
+
+    private void SendFlightMode()
+    {
+        ClientConfig cfg;
+        lock (_gate) cfg = _cfg.Clone();
+        var cmds = new List<string>();
+        // "axis=cmd[:-1],cmd...;axis=..." -> candidates tried in order by the Export (calibration)
+        foreach (var item in (cfg.FlightAxisCommands ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var kv = item.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (kv.Length != 2) continue;
+            var cands = new List<string>();
+            foreach (var cand in kv[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var cs = cand.Split(':', StringSplitOptions.TrimEntries);
+                if (!int.TryParse(cs[0], out var cmd)) continue;
+                cands.Add($"{cmd}:{(cs.Length > 1 && cs[1].StartsWith('-') ? "-1" : "1")}");
+            }
+            if (cands.Count > 0) cmds.Add($"{kv[0].ToLowerInvariant()}={string.Join(",", cands)}");
+        }
+        bool inject;
+        lock (_gate) inject = InjectAllowed(cfg);
+        _bridge.SendToExport($"FMODE|{(cfg.FlightMirrorSend ? 1 : 0)}|{(inject ? 1 : 0)}|{(cfg.FlightDiagnostics ? 1 : 0)}|{string.Join(";", cmds)}");
+    }
+
     // ---------------------------------------------------------- DCS messages
 
     private void OnExportMessage(string text)
@@ -512,7 +608,9 @@ public sealed class SyncEngine : IDisposable
                 {
                     // Ask for a full snapshot so we know the current cockpit state
                     _bridge.SendToExport("SNAPSHOT");
-                    Log?.Invoke($"Sync ACTIVE ({name}).");
+                    string shown;
+                    lock (_gate) shown = name.Length > 0 ? name : EffectiveAircraft;
+                    Log?.Invoke($"Sync ACTIVE ({shown}).");
                     SendState();
                 }
                 else if (changed)
@@ -562,6 +660,48 @@ public sealed class SyncEngine : IDisposable
                 break;
             }
 
+            case "FLT":
+            {
+                var values = new Dictionary<string, double>();
+                string aircraft;
+                bool supported, warn;
+                lock (_gate)
+                {
+                    _exportLastSeen = Now;
+                    if (_profile == null || IsStandby || !_connectRequested) return;
+                    aircraft = _profileAircraft;
+                    supported = _flightSupported;
+                    warn = !supported && _serverChecked && !_flightWarned;
+                    if (warn) _flightWarned = true;
+                    foreach (var entry in (parts.Length > 1 ? parts[1] : "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var kv = entry.Split('=');
+                        if (kv.Length != 2) continue;
+                        if (!double.TryParse(kv[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var val)) continue;
+                        values[kv[0]] = val;
+                    }
+                    if (supported && values.Count > 0) _flightSent++;
+                }
+                if (warn) Log?.Invoke("Flight controls are not mirrored: the UCS server is older than 0.1.2-alpha.");
+                if (supported && values.Count > 0)
+                {
+                    SendToServer(new UcsMessage
+                    {
+                        Type = Protocol.Flight,
+                        ClientId = _clientId,
+                        Aircraft = aircraft,
+                        Seq = Interlocked.Increment(ref _seq),
+                        Values = values,
+                    });
+                }
+                break;
+            }
+
+            case "DIAG":
+                lock (_gate) _exportLastSeen = Now;
+                Log?.Invoke("[diag] " + (parts.Length > 1 ? string.Join("|", parts.Skip(1)) : ""));
+                break;
+
             case "BYE":
                 lock (_gate)
                 {
@@ -597,6 +737,18 @@ public sealed class SyncEngine : IDisposable
         var unit = Str(root, "unit");
         var aircraft = Str(root, "aircraft");
         var player = Str(root, "player").Trim();
+        var seat = root.TryGetProperty("seat", out var seatEl) && seatEl.ValueKind == JsonValueKind.Number && seatEl.TryGetInt32(out var sv) ? sv : 1;
+        bool seatChanged;
+        lock (_gate)
+        {
+            seatChanged = seat != _seat;
+            _seat = seat;
+        }
+        if (seatChanged)
+        {
+            Log?.Invoke($"Multicrew seat: {seat}.");
+            SendFlightMode();
+        }
         CheckScriptVersion("UCS-Hook.lua", Str(root, "version"));
         bool nameChanged = false;
         if (player.Length > 0)
@@ -726,6 +878,17 @@ public sealed class SyncEngine : IDisposable
             return;
         }
 
+        // Profile generated by an older UCS (no flight controls): regenerate it once
+        if (mod != null && autoGen && profile.Schema < AircraftProfile.CurrentSchema &&
+            (profile.GeneratedBy ?? "").StartsWith("UCS-ProfileGen", StringComparison.Ordinal) &&
+            string.Equals(mod.Version, profile.ModVersion, StringComparison.Ordinal) &&
+            StartAutoGenerate(mod, "profile from an older UCS version, adding flight controls"))
+        {
+            SetStandby();
+            lock (_gate) _profileAircraft = aircraft;
+            return;
+        }
+
         // Profile generated for another version of the mod: regenerate it (mod updated)
         if (mod != null && !string.Equals(mod.Version, profile.ModVersion, StringComparison.Ordinal))
         {
@@ -748,7 +911,8 @@ public sealed class SyncEngine : IDisposable
             _profileHash = profile.Fingerprint();
             _localValues.Clear();
         }
-        Log?.Invoke($"Profile loaded: {profile.AircraftName} ({profile.Args.Count} controls, mod {Fmt(_modVersion)}, profile {_profileHash}).");
+        Log?.Invoke($"Profile loaded: {profile.AircraftName} ({profile.Args.Count} controls, {profile.Flight?.Count ?? 0} flight-control animations, " +
+                    $"mod {Fmt(_modVersion)}, profile {_profileHash}).");
         if (exportAlive) SendProfile(profile, aircraft);
         SendState();
     }
@@ -761,7 +925,7 @@ public sealed class SyncEngine : IDisposable
     /// </summary>
     private bool StartAutoGenerate(ModInfo mod, string reason)
     {
-        var key = $"{mod.Aircraft}|{mod.Version}";
+        var key = $"{mod.Aircraft}|{mod.Version}|{AircraftProfile.CurrentSchema}";
         lock (_gate)
         {
             if (_generating || !_autoGenTried.Add(key)) return false;
@@ -787,7 +951,8 @@ public sealed class SyncEngine : IDisposable
                 Directory.CreateDirectory(dir);
                 var path = Path.Combine(dir, ProfileBuilder.FileNameFor(mod.Aircraft));
                 result.Profile.Save(path);
-                Log?.Invoke($"Profile generated: {result.Profile.Args.Count} controls, mod {Fmt(result.Profile.ModVersion)} ({result.Method}).");
+                Log?.Invoke($"Profile generated: {result.Profile.Args.Count} controls, {result.FlightArgs} flight-control animations, " +
+                            $"mod {Fmt(result.Profile.ModVersion)} ({result.Method}).");
             }
             catch (Exception ex)
             {
@@ -847,6 +1012,7 @@ public sealed class SyncEngine : IDisposable
         for (var i = 0; i < parts.Count; i++)
             _bridge.SendToExport($"PROFILE_PART|{safeName}|{i}|{parts[i]}");
         _bridge.SendToExport($"PROFILE_END|{safeName}");
+        SendFlightArgs(profile);
     }
 
     // ----------------------------------------------------------- periodic

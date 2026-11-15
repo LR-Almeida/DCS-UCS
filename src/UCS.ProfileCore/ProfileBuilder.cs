@@ -24,6 +24,7 @@ public sealed class ProfileGenResult
     public int FlightControlsRemoved { get; set; }
     public int AxesRemoved { get; set; }
     public int Duplicates { get; set; }
+    public int FlightArgs => Profile.Flight?.Count ?? 0;
 }
 
 /// <summary>
@@ -72,6 +73,7 @@ public static class ProfileBuilder
             Description = "Generated locally by UCS-ProfileGen. Do not redistribute.",
             GeneratedBy = $"UCS-ProfileGen {Protocol.Version} ({method})",
             GeneratedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            Schema = AircraftProfile.CurrentSchema,
         };
         var result = new ProfileGenResult
         {
@@ -105,6 +107,20 @@ public static class ProfileBuilder
                 Description = $"{e.Kind} {e.ArgId}",
                 Type = e.Kind,
             };
+        }
+
+        // Flight-control animations (stick, pedals, collective): mirrored on their own channel.
+        try
+        {
+            var flight = FlightGaugeParser.Parse(scriptsDir, result.Warnings);
+            // A clickable arg is synced as a switch: never mirror it as a flight control too.
+            flight.RemoveAll(f => profile.Args.ContainsKey(f.Arg));
+            profile.Flight = flight;
+        }
+        catch (Exception ex)
+        {
+            result.Warnings.Add("Flight control scan failed: " + ex.Message);
+            profile.Flight = new();
         }
         return result;
     }

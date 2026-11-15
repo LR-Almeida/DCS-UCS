@@ -31,7 +31,7 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart('v') } else { $v = "0.1.1-alpha" }
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart('v') } else { $v = "0.1.2-alpha" }
           "value=$v" >> $env:GITHUB_OUTPUT
 
       - name: Publish executables
@@ -83,7 +83,8 @@ jobs:
           $files = @(Get-ChildItem installer/Output/*.exe) + @(Get-ChildItem DCS-UCS-portable-*.zip) +
                    @(Get-Item publish/UCS-Client.exe, publish/UCS-Server.exe, publish/UCS-ProfileGen.exe)
           $lines = $files | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name }
-          $lines | Set-Content -Encoding ascii SHA256SUMS.txt
+          # LF line endings so "sha256sum -c SHA256SUMS.txt" works too
+          [IO.File]::WriteAllText("$PWD/SHA256SUMS.txt", (($lines -join "`n") + "`n"), [Text.Encoding]::ASCII)
           Get-Content SHA256SUMS.txt
 
       - name: Upload artifacts

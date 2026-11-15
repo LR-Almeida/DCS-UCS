@@ -28,10 +28,41 @@ All traffic is UDP. Local links never leave `127.0.0.1`.
 | Client → Export | `STANDBY` | No profile for this aircraft: do nothing |
 | Client → Export | `SET\|17=1;30=0.5` | Remote changes → `GetDevice(dev):performClickableAction(cmd, val)` |
 | Client → Export | `SNAPSHOT` | Send the full state once |
+| Client → Export | `FLIGHT\|arg:axis:min:max;...` | 0.1.2+: flight-control animation args (stick, pedals, collective) from the profile's `flight` list |
+| Client → Export | `FMODE\|<send>\|<inject>\|<diag>\|axis=cmd:sign;...` | 0.1.2+: flight channel settings and the DCS input command per axis |
+| Client → Export | `FSET\|15=0.5;11=-0.2` | 0.1.2+: flight-control positions of the crew member flying |
+| Export → Client | `FLT\|15=0.5000;11=-0.2000` | 0.1.2+: local flight-control positions, up to 30 Hz, on change (> 0.002) |
+| Export → Client | `DIAG\|<text>` | 0.1.2+: diagnostic messages (flickering args, injection pauses), shown in the client log |
 
 Loop prevention: after a `SET`, the argument is locked for 0.3 s (`ignore_until[arg]`) and its
 last value is updated, so the resulting animation is not echoed back. The Client also drops
 remote values that already match the local cockpit (± 0.01).
+
+### Flight controls (0.1.2+, experimental)
+
+Stick, pedals and collective are not clickable: the mod animates them every frame from its own
+flight model (`mainpanel_init.lua` "parameter" gauges such as `CYCLIC_PITCH_COCKPIT` or
+`PITCH_INPUT`). Writing those animation args from outside would only flicker (two sources
+fighting over one argument), so UCS mirrors them differently:
+
+- Every seat sends its flight args (`FLT` → `flight` message, separate rate budget on the server).
+- **Injection (opt-in, off at every client start, never in seat 1):** the seat that is *not* flying
+  feeds the received positions into DCS as joystick input (`LoSetCommand(cmd, -1..1)`), so the mod
+  itself animates that seat's stick like the pilot's. In the seat that has the controls this really
+  flies the aircraft (verified in single player), so the client only enables it when the hook reports
+  seat 2+ (`slot` "123_2"). Each axis has candidate commands (`client_config.json` →
+  `FlightAxisCommands`, `axis=cmd[:-1],cmd...`): the Export tries them in order until the animation
+  follows a clear deflection (0.6 s each) and logs the one it keeps. Command ids read from the DCS input
+  environment: 2001 pitch, 2002 roll, 2003 rudder, 2004 thrust, 2087 `iCommandPlaneCollective`.
+  OH-6A 1.7 (verified in game): pitch 2001 inverted, roll 2002, rudder 2003, collective 2004 inverted
+  (it ignores 2087).
+- Safety: per axis, if the local animation disagrees with the injected value for more than 1 s
+  (someone moves the local control) that axis pauses for 3 s; after 3 pauses in a row it is
+  disabled and reported (wrong command, inverted axis). Nothing is injected when the stream stops
+  (> 0.5 s without `FSET`).
+- **Diagnostics:** `FMODE` diag = 1 writes `Saved Games\DCS\Logs\UCS\UCS-diag-<time>.csv` every frame
+  (local and remote value of each flight arg, injected values, paused axes) and reports, every
+  5 s, any cockpit argument that bounces between two values (direction reversals frame to frame).
 
 ## Hook → Client (JSON)
 
@@ -40,7 +71,8 @@ remote values that already match the local cockpit (± 0.01).
 {"type":"autoconnect","addr":"192.168.1.50:5055"}
 ```
 
-`server` is `"LOCAL"` in single player. Auto-connect messages are only accepted from the
+`server` is `"LOCAL"` in single player. 0.1.2+ also sends `player` (DCS name, "" for the single-player
+placeholder) and `seat` (1 = first seat, 2 = slot `"<unit>_2"`...). Auto-connect messages are only accepted from the
 DCS server (player id 0/1) so other players cannot redirect you.
 
 ## Client ⇄ Server (JSON, snake_case)
@@ -50,6 +82,7 @@ DCS server (player id 0/1) so other players cannot redirect you.
 | `state` | C → S, every 2 s and on change | `client_id, name, version, server, group, unit, room, aircraft, standby, mod_version, profile_hash, protocol, args_format` |
 | `welcome` | S → C, answer to `state` | `version, session_key, peers, peer_names, incompatible[...]`; level 2+: `protocol, args_format, features[], crew[{name, mod_version, profile_hash, ucs_version, args_format}]` |
 | `args` | C → S → C | `client_id, aircraft, seq, values{"arg":value}`, optional `target` |
+| `flight` | C → S → C | level 3+ (server feature `flight_mirror`): same fields as `args`, flight-control positions; max 90/s per client |
 | `peer_joined` | S → oldest compatible crew member | `client_id, name` → that client sends a targeted `args` snapshot |
 | `leave` | C → S | `client_id` |
 | `error` | S → C | `message` |

@@ -21,10 +21,26 @@
 --      STANDBY
 --      SET|<arg>=<val>;<arg>=<val>;...
 --      SNAPSHOT            (asks Export to resend every watched argument)
+--
+--  Flight controls (0.1.2+). Stick / pedals / collective are not clickable: the mod
+--  animates them from its own flight model, so they use a separate channel.
+--    Client -> Export
+--      FLIGHT|<arg>:<axis>:<min>:<max>;...       flight-control animation args
+--      FMODE|<send>|<inject>|<diag>|<axis>=<cmd>:<sign>,<cmd>:<sign>;...   (candidates)
+--      FSET|<arg>=<val>;...                      flight args of whoever is flying
+--    Export -> Client
+--      FLT|<arg>=<val>;...                       local flight args (~30 Hz, on change)
+--      DIAG|<text>                               diagnostic messages for the client log
+--
+--  "inject" (experimental, off by default) feeds the received stick position into this
+--  seat as joystick input (LoSetCommand) so the mod animates the stick like the pilot's.
+--  It pauses by itself when the local stick is moved. Only for the seat NOT flying.
+--  "diag" writes Saved Games\DCS\Logs\UCS\UCS-diag-<time>.csv (every frame) and reports
+--  flickering cockpit arguments (two sources fighting over the same animation).
 -- =============================================================================
 
 local UCS = {
-    version       = "0.1.1-alpha",
+    version       = "0.1.2-alpha",
     host          = "127.0.0.1",
     sendPort      = 5051,
     listenPort    = 5052,
@@ -46,6 +62,26 @@ UCS.ignoreUntil  = {}
 UCS.nextPoll     = 0
 UCS.nextSelf     = 0
 UCS.forceAll     = false
+
+-- Flight-control channel
+UCS.flight       = {}        -- list of { arg=, axis=, min=, max= }
+UCS.fsend        = false
+UCS.finject      = false
+UCS.fdiag        = false
+UCS.fcmds        = {}        -- axis -> { cmd=, sign= }
+UCS.fremote      = {}        -- arg -> latest received value
+UCS.fremoteAt    = 0
+UCS.fsent        = {}        -- arg -> last value sent
+UCS.nextFlt      = 0
+UCS.fltInterval  = 1 / 30
+UCS.axisPause    = {}        -- axis -> paused until (local input detected)
+UCS.axisPauses   = {}        -- axis -> pauses in a row without ever following the input
+UCS.axisOff      = {}        -- axis -> true when disabled (does not follow the injected input)
+UCS.injectOff    = {}        -- axis -> time the local input started to disagree
+UCS.injected     = {}        -- axis -> last injected -1..1 value
+UCS.cal          = {}        -- axis -> { idx = candidate in use, ok = calibrated, since = }
+UCS.fcmdsText    = ""
+UCS.diag         = nil
 
 local dcsLog = log -- DCS global logging module (may be nil in old versions)
 local function log(msg)
@@ -99,6 +135,12 @@ local function now()
     return os.clock()
 end
 
+-- Wall clock (os.clock is process CPU time). LuaSocket is loaded in LuaExportStart.
+local function wall()
+    if UCS.socket and UCS.socket.gettime then return UCS.socket.gettime() end
+    return os.clock()
+end
+
 local function getSelfName()
     local ok, data = pcall(LoGetSelfData)
     if ok and type(data) == "table" and data.Name then
@@ -114,6 +156,9 @@ local function goStandby(reason)
     UCS.active = false
     UCS.lastValues = {}
     UCS.ignoreUntil = {}
+    UCS.fremote = {}
+    UCS.fsent = {}
+    UCS.injected = {}
 end
 
 local function activateIfPossible()
@@ -154,7 +199,17 @@ local function applyRemote(payload)
         local val = tonumber(kv[2])
         if arg and val then
             local def = UCS.profile.args[arg]
-            if def then
+            -- Already in the requested position: do nothing. Some mods implement switches
+            -- as toggles (each click flips the state, ignoring the value), so "clicking"
+            -- a switch that already matches would invert it (e.g. UH-60L doors).
+            local same = false
+            if def and cockpit then
+                local okc, cur = pcall(cockpit.get_argument_value, cockpit, arg)
+                same = okc and type(cur) == "number" and math.abs(cur - val) < UCS.threshold
+            end
+            if def and same then
+                UCS.lastValues[arg] = val
+            elseif def then
                 -- Loop prevention: lock this argument and remember the value
                 UCS.ignoreUntil[arg] = t + UCS.lockTime
                 UCS.lastValues[arg] = val
@@ -173,6 +228,8 @@ local function applyRemote(payload)
         end
     end
 end
+
+local diagOpen, diagClose -- defined in the Diagnostics section
 
 local function handleMessage(msg)
     local parts = split(msg, "|")
@@ -221,6 +278,59 @@ local function handleMessage(msg)
         applyRemote(parts[2] or "")
     elseif kind == "SNAPSHOT" then
         UCS.forceAll = true
+    elseif kind == "FLIGHT" then
+        local list = {}
+        local entries = split(parts[2] or "", ";")
+        for i = 1, #entries do
+            local f = split(entries[i], ":")
+            local arg, mn, mx = tonumber(f[1]), tonumber(f[3]), tonumber(f[4])
+            if arg and f[2] and mn and mx and mn ~= mx then
+                table.insert(list, { arg = arg, axis = f[2], min = mn, max = mx })
+            end
+        end
+        UCS.flight = list
+        UCS.fsent = {}
+        log("Flight-control args: " .. #list)
+    elseif kind == "FMODE" then
+        UCS.fsend = parts[2] == "1"
+        local inject = parts[3] == "1"
+        local diag = parts[4] == "1"
+        -- axis=cmd:sign,cmd:sign;...  (candidates in order, see calibrate())
+        local cmds = {}
+        local entries = split(parts[5] or "", ";")
+        for i = 1, #entries do
+            local kv = split(entries[i], "=")
+            local list = {}
+            local cands = split(kv[2] or "", ",")
+            for j = 1, #cands do
+                local cs = split(cands[j], ":")
+                local cmd, sign = tonumber(cs[1]), tonumber(cs[2]) or 1
+                if cmd then table.insert(list, { cmd = cmd, sign = (sign < 0) and -1 or 1 }) end
+            end
+            if kv[1] and #list > 0 then cmds[kv[1]] = list end
+        end
+        local changed = table.concat(entries, ";") ~= UCS.fcmdsText
+        UCS.fcmdsText = table.concat(entries, ";")
+        UCS.fcmds = cmds
+        if changed then UCS.cal = {} end
+        if inject ~= UCS.finject then
+            log("Flight input mirror (experimental): " .. (inject and "ON" or "OFF"))
+            UCS.injected = {}
+            UCS.injectOff = {}
+            UCS.axisPause, UCS.axisPauses, UCS.axisOff = {}, {}, {}
+            UCS.cal = {}
+        end
+        UCS.finject = inject
+        if diag and not UCS.diag then diagOpen() elseif not diag and UCS.diag then diagClose() end
+        UCS.fdiag = diag
+    elseif kind == "FSET" then
+        local entries = split(parts[2] or "", ";")
+        for i = 1, #entries do
+            local kv = split(entries[i], "=")
+            local arg, val = tonumber(kv[1]), tonumber(kv[2])
+            if arg and val then UCS.fremote[arg] = val end
+        end
+        UCS.fremoteAt = wall()
     end
 end
 
@@ -278,6 +388,232 @@ local function scanArguments()
     end
 end
 
+
+-- -----------------------------------------------------------------------------
+-- Flight controls
+-- -----------------------------------------------------------------------------
+local function readArg(cockpit, arg)
+    local ok, val = pcall(cockpit.get_argument_value, cockpit, arg)
+    if ok and type(val) == "number" then return val end
+    return nil
+end
+
+-- Argument value (gauge output range) -> -1..1 joystick axis
+local function toAxis(f, v)
+    local n = 2 * (v - f.min) / (f.max - f.min) - 1
+    if n > 1 then n = 1 elseif n < -1 then n = -1 end
+    return n
+end
+
+local function sendFlight(cockpit, t)
+    if not UCS.fsend or UCS.finject or #UCS.flight == 0 or t < UCS.nextFlt then return end
+    UCS.nextFlt = t + UCS.fltInterval
+    local out = {}
+    for i = 1, #UCS.flight do
+        local f = UCS.flight[i]
+        local v = readArg(cockpit, f.arg)
+        if v then
+            local last = UCS.fsent[f.arg]
+            if last == nil or math.abs(v - last) > 0.002 then
+                UCS.fsent[f.arg] = v
+                table.insert(out, f.arg .. "=" .. string.format("%.4f", v))
+            end
+        end
+    end
+    if #out > 0 then send("FLT|" .. table.concat(out, ";")) end
+end
+
+-- Feeds the remote stick position into this seat as joystick input.
+--
+-- Each axis has a list of candidate commands (FMODE "pitch=2001:1,2001:-1"): mods differ in the input
+-- they read and in its direction (OH-6A: pitch inverted, collective on the thrust axis 2004 inverted).
+-- Calibration: inject with a candidate; if after 0.6 s the animation does not match the received
+-- position (needs a clear stick deflection), try the next one. The first that matches is kept.
+local function calibrate(f, axis, cands, cal, la, target, t)
+    if math.abs(target) < 0.15 then return end         -- centred stick: cannot tell the direction yet
+    cal.since = cal.since or t
+    if t - cal.since < 0.6 then return end
+    local c = cands[cal.idx]
+    if math.abs(la - target) < 0.12 then
+        cal.ok = true
+        log("Flight input mirror: " .. axis .. " calibrated, command " .. c.cmd .. (c.sign < 0 and " inverted" or ""))
+        send("DIAG|Flight input mirror: " .. axis .. " uses command " .. c.cmd .. (c.sign < 0 and " (inverted)" or "") ..
+            " (arg " .. f.arg .. ")")
+        return
+    end
+    cal.idx = cal.idx + 1
+    cal.since = nil
+    if cal.idx > #cands then
+        UCS.axisOff[axis] = true
+        send("DIAG|Flight input mirror: " .. axis .. " DISABLED - no candidate command moves arg " .. f.arg ..
+            string.format(" (local %.2f vs received %.2f). Set FlightAxisCommands in client_config.json.", la, target))
+    end
+end
+
+local function injectFlight(cockpit, t)
+    if not UCS.finject or #UCS.flight == 0 then return end
+    if t - UCS.fremoteAt > 0.5 then return end          -- stream stopped: leave inputs alone
+    for i = 1, #UCS.flight do
+        local f = UCS.flight[i]
+        local axis = f.axis
+        local cands = UCS.fcmds[axis]
+        local rv = UCS.fremote[f.arg]
+        if cands and #cands > 0 and rv and not UCS.axisOff[axis] and t >= (UCS.axisPause[axis] or 0) then
+            local target = toAxis(f, rv)
+            local cal = UCS.cal[axis]
+            if not cal then cal = { idx = 1 }; UCS.cal[axis] = cal end
+            local lv = readArg(cockpit, f.arg)
+            local la = lv and toAxis(f, lv)
+            local paused = false
+            if la and UCS.injected[axis] then
+                if not cal.ok then
+                    calibrate(f, axis, cands, cal, la, target, t)
+                elseif math.abs(la - target) > 0.25 then
+                    -- Safety (per axis): the animation disagrees for more than 1 s -> someone moves the
+                    -- local control: pause that axis for 3 s (3 pauses in a row: disable it).
+                    UCS.injectOff[axis] = UCS.injectOff[axis] or t
+                    if t - UCS.injectOff[axis] > 1.0 then
+                        paused = true
+                        UCS.axisPause[axis] = t + 3
+                        UCS.injectOff[axis] = nil
+                        UCS.injected[axis] = nil
+                        UCS.axisPauses[axis] = (UCS.axisPauses[axis] or 0) + 1
+                        log("Flight input mirror: " .. axis .. " paused, local input detected")
+                        send("DIAG|Flight input mirror: " .. axis .. " paused 3 s, the local control disagrees (arg " .. f.arg ..
+                            string.format(", local %.2f vs received %.2f)", la, target))
+                        if UCS.axisPauses[axis] >= 3 then
+                            UCS.axisOff[axis] = true
+                            send("DIAG|Flight input mirror: " .. axis .. " DISABLED after 3 pauses (the local control keeps moving)")
+                        end
+                    end
+                else
+                    UCS.injectOff[axis] = nil
+                    UCS.axisPauses[axis] = 0
+                end
+            end
+            if not paused and not UCS.axisOff[axis] then
+                local c = cands[cal.idx]
+                local cmdValue = target * c.sign
+                pcall(LoSetCommand, c.cmd, cmdValue)
+                UCS.injected[axis] = cmdValue
+            end
+        end
+    end
+end
+
+
+-- -----------------------------------------------------------------------------
+-- Diagnostics
+-- -----------------------------------------------------------------------------
+diagOpen = function()
+    local ok, err = pcall(function()
+        local lfs = require("lfs")
+        local dir = lfs.writedir() .. [[Logs\UCS]]
+        pcall(lfs.mkdir, dir) -- keeps UCS files together (no error if it already exists)
+        local name = dir .. [[\UCS-diag-]] .. os.date("%Y%m%d-%H%M%S") .. ".csv"
+        local file = io.open(name, "w")
+        if not file then error("cannot create " .. name) end
+        local cols = { "wall", "model_time", "frame_ms", "inject", "paused" }
+        for i = 1, #UCS.flight do
+            local f = UCS.flight[i]
+            table.insert(cols, "a" .. f.arg .. "_" .. f.axis .. "_local")
+            table.insert(cols, "a" .. f.arg .. "_" .. f.axis .. "_remote")
+        end
+        for _, axis in ipairs({ "pitch", "roll", "yaw", "collective" }) do table.insert(cols, "inj_" .. axis) end
+        file:write(table.concat(cols, ",") .. "\n")
+        UCS.diag = { file = file, name = name, bytes = 0, last = nil, prev = {}, prev2 = {}, flips = {}, lo = {}, hi = {}, nextReport = wall() + 5 }
+        log("Diagnostic CSV: " .. name)
+        send("DIAG|Recording " .. name)
+    end)
+    if not ok then
+        log("diagnostic open failed: " .. tostring(err))
+        send("DIAG|Could not create the diagnostic file: " .. tostring(err))
+        UCS.diag = nil
+    end
+end
+
+diagClose = function()
+    if UCS.diag and UCS.diag.file then
+        pcall(function() UCS.diag.file:close() end)
+        send("DIAG|Diagnostic file closed: " .. UCS.diag.name)
+    end
+    UCS.diag = nil
+end
+
+-- Counts direction reversals frame by frame: a value bouncing between two positions
+-- means two sources write the same animation argument.
+local function trackFlicker(d, arg, v)
+    local p, p2 = d.prev[arg], d.prev2[arg]
+    if p and p2 then
+        local d1, d2 = p - p2, v - p
+        if math.abs(d1) > 0.02 and math.abs(d2) > 0.02 and (d1 > 0) ~= (d2 > 0) then
+            d.flips[arg] = (d.flips[arg] or 0) + 1
+        end
+    end
+    d.prev2[arg] = p
+    d.prev[arg] = v
+    if d.lo[arg] == nil or v < d.lo[arg] then d.lo[arg] = v end
+    if d.hi[arg] == nil or v > d.hi[arg] then d.hi[arg] = v end
+end
+
+local function pausedAxes(t)
+    local out = {}
+    for axis, untilT in pairs(UCS.axisPause) do if t < untilT then table.insert(out, axis) end end
+    for axis, _ in pairs(UCS.axisOff) do table.insert(out, axis .. "-off") end
+    table.sort(out)
+    return table.concat(out, " ")
+end
+
+local function diagFrame(cockpit, t)
+    local d = UCS.diag
+    if not d or not d.file then return end
+    local frameMs = d.last and (t - d.last) * 1000 or 0
+    d.last = t
+    local okm, mt = pcall(LoGetModelTime)
+    local row = {
+        string.format("%.3f", t), string.format("%.3f", (okm and mt) or 0), string.format("%.1f", frameMs),
+        UCS.finject and "1" or "0", pausedAxes(t),
+    }
+    for i = 1, #UCS.flight do
+        local f = UCS.flight[i]
+        local v = readArg(cockpit, f.arg)
+        if v then trackFlicker(d, f.arg, v) end
+        table.insert(row, v and string.format("%.4f", v) or "")
+        local rv = UCS.fremote[f.arg]
+        table.insert(row, rv and string.format("%.4f", rv) or "")
+    end
+    for _, axis in ipairs({ "pitch", "roll", "yaw", "collective" }) do
+        local iv = UCS.injected[axis]
+        table.insert(row, iv and string.format("%.4f", iv) or "")
+    end
+    -- Switch args too (flicker counting only, not written to the CSV)
+    if UCS.profile then
+        for arg, _ in pairs(UCS.profile.args) do
+            local v = readArg(cockpit, arg)
+            if v then trackFlicker(d, arg, v) end
+        end
+    end
+    local line = table.concat(row, ",") .. "\n"
+    if d.bytes < 200 * 1024 * 1024 then
+        d.file:write(line)
+        d.bytes = d.bytes + #line
+    end
+    if t >= d.nextReport then
+        d.nextReport = t + 5
+        pcall(function() d.file:flush() end)
+        local found = {}
+        for arg, n in pairs(d.flips) do
+            if n >= 4 then
+                table.insert(found, string.format("%d (%d flips, %.2f..%.2f)", arg, n, d.lo[arg] or 0, d.hi[arg] or 0))
+            end
+        end
+        if #found > 0 then
+            send("DIAG|Flickering args in the last 5 s: " .. table.concat(found, "; "))
+        end
+        d.flips, d.lo, d.hi = {}, {}, {}
+    end
+end
+
 -- -----------------------------------------------------------------------------
 -- Export callbacks (chained)
 -- -----------------------------------------------------------------------------
@@ -330,6 +666,15 @@ LuaExportAfterNextFrame = function()
             UCS.nextPoll = t + UCS.pollInterval
             scanArguments()
         end
+        if UCS.active then
+            local cockpit = GetDevice(0)
+            if cockpit then
+                local w = wall()
+                sendFlight(cockpit, w)
+                injectFlight(cockpit, w)
+                if UCS.diag then diagFrame(cockpit, w) end
+            end
+        end
     end)
     if not ok then log("frame error: " .. tostring(err)) end
 end
@@ -339,6 +684,9 @@ LuaExportStop = function()
         send("BYE")
         if UCS.udp then UCS.udp:close() end
     end)
+    diagClose()
+    UCS.fdiag = false
+    UCS.finject = false
     UCS.udp = nil
     UCS.active = false
     UCS.profile = nil

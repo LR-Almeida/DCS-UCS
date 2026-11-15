@@ -21,6 +21,8 @@ internal sealed class ConnectedClient
     public long JoinedAt { get; init; }
     public long RateWindowStart { get; set; }
     public int RateCount { get; set; }
+    public long FlightWindowStart { get; set; }
+    public int FlightCount { get; set; }
 
     /// <summary>A client relays only when paired to a session, flying a profiled aircraft and not in standby.</summary>
     public bool Eligible => !Standby && SessionKey.Length > 0 && Aircraft.Length > 0;
@@ -149,7 +151,7 @@ internal sealed class SyncServer
 
     public string? PublicAddress { get; private set; }
 
-    private static readonly List<string> ServerFeatures = new() { Protocol.Features.ModCheck, Protocol.Features.UcsVersionCheck };
+    private static readonly List<string> ServerFeatures = new() { Protocol.Features.ModCheck, Protocol.Features.UcsVersionCheck, Protocol.Features.FlightMirror };
 
     /// <summary>Tells the admin when a newer UCS-Server is published (never updates by itself).</summary>
     private async Task UpdateNoticeLoopAsync(CancellationToken ct)
@@ -180,6 +182,7 @@ internal sealed class SyncServer
         {
             case Protocol.State: HandleState(msg, from); break;
             case Protocol.Args: HandleArgs(msg, from); break;
+            case Protocol.Flight: HandleArgs(msg, from); break;
             case Protocol.Leave: HandleLeave(msg, from); break;
         }
     }
@@ -327,12 +330,25 @@ internal sealed class SyncServer
 
             var now = NowMs;
             sender.LastSeen = now;
-            if (now - sender.RateWindowStart >= 1000)
+            if (msg.Type == Protocol.Flight)
             {
-                sender.RateWindowStart = now;
-                sender.RateCount = 0;
+                // Separate budget: a ~30 Hz stick stream must never starve switch changes.
+                if (now - sender.FlightWindowStart >= 1000)
+                {
+                    sender.FlightWindowStart = now;
+                    sender.FlightCount = 0;
+                }
+                if (++sender.FlightCount > 90) return;
             }
-            if (++sender.RateCount > _cfg.MaxPacketsPerSecond) return;
+            else
+            {
+                if (now - sender.RateWindowStart >= 1000)
+                {
+                    sender.RateWindowStart = now;
+                    sender.RateCount = 0;
+                }
+                if (++sender.RateCount > _cfg.MaxPacketsPerSecond) return;
+            }
 
             var query = _clients.Values.Where(c => sender.CanSyncWith(c));
             if (!string.IsNullOrEmpty(msg.Target)) query = query.Where(c => c.Id == msg.Target);
@@ -342,7 +358,7 @@ internal sealed class SyncServer
 
         var outMsg = new UcsMessage
         {
-            Type = Protocol.Args,
+            Type = msg.Type == Protocol.Flight ? Protocol.Flight : Protocol.Args,
             ClientId = sender.Id,
             From = sender.Name,
             Aircraft = sender.Aircraft,
@@ -351,7 +367,7 @@ internal sealed class SyncServer
         };
         var bytes = Protocol.Serialize(outMsg);
         foreach (var ep in targets) SendRaw(bytes, ep);
-        if (_cfg.Verbose) Log("DEBUG", $"{sender.Name}: {msg.Values.Count} args -> {targets.Count} peer(s)");
+        if (_cfg.Verbose && msg.Type != Protocol.Flight) Log("DEBUG", $"{sender.Name}: {msg.Values.Count} args -> {targets.Count} peer(s)");
     }
 
     private void HandleLeave(UcsMessage msg, IPEndPoint from)

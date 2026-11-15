@@ -48,6 +48,18 @@ public static partial class ModLocator
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Saved Games");
     }
 
+    /// <summary>DCS write folder (Saved Games\DCS, or DCS.openbeta when only that one exists).</summary>
+    public static string DcsWriteDir()
+    {
+        var sg = SavedGamesDir();
+        var stable = Path.Combine(sg, "DCS");
+        var beta = Path.Combine(sg, "DCS.openbeta");
+        return !Directory.Exists(stable) && Directory.Exists(beta) ? beta : stable;
+    }
+
+    /// <summary>Folder for every UCS log: Saved Games\DCS\Logs\UCS.</summary>
+    public static string UcsLogDir() => Path.Combine(DcsWriteDir(), "Logs", "UCS");
+
     public static IEnumerable<string> ModRoots()
     {
         var sg = SavedGamesDir();

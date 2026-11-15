@@ -132,6 +132,8 @@ if (noAxes) Console.WriteLine($"Axes removed:            {result.AxesRemoved}");
 Console.WriteLine($"Duplicate args ignored:  {result.Duplicates}");
 Console.WriteLine($"Arguments in profile:    {result.Profile.Args.Count}");
 Console.WriteLine($"Profile fingerprint:     {result.Profile.Fingerprint()}");
+Console.WriteLine($"Flight-control args:     {result.FlightArgs}" +
+                  (result.FlightArgs > 0 ? "  (" + string.Join(", ", result.Profile.Flight!.Select(f => $"{f.Arg} {f.Axis}")) + ")" : ""));
 foreach (var w in result.Warnings.Take(verbose ? int.MaxValue : 10)) Console.WriteLine("  warn: " + w);
 if (!verbose && result.Warnings.Count > 10) Console.WriteLine($"  ... {result.Warnings.Count - 10} more warning(s) (use --verbose)");
 

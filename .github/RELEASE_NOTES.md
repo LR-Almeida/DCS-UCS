@@ -12,19 +12,29 @@
 Windows 10/11 x64. No .NET install needed (self-contained). The executables are not code-signed yet, so
 Windows SmartScreen may warn on first run.
 
-## What's new in 0.1.1-alpha
+## What's new in 0.1.2-alpha
 
-- **Client in English** with tabs: General (scrollable), Log (copy / save to file), Update, Help, About.
-- **Pilot name detected automatically** from DCS (multiplayer nickname).
-- **In-app updates:** automatic check (on by default), *Update now*, *Close DCS and update* (confirm the exit in
-  DCS), *Update when DCS closes*, *Skip this version*. Downloads are verified with SHA-256.
-  Users of 0.1.0-alpha must install this version manually once.
-- **Backward compatibility:** new clients work with older UCS servers; unsupported features are disabled and
-  listed in the log. Crew members on different UCS versions get a note.
-- **UCS-Server shows the addresses to share:** public IP (like games do) and local/VPN addresses (Radmin,
-  Hamachi, ZeroTier, Tailscale), plus a console notice when a new server version exists.
-- Warning when DCS is still running older UCS scripts (restart DCS after updating).
-- Privacy section in the README listing every network connection and how to disable it.
+- **Flight controls mirror (experimental):** the stick, pedals and collective animations are found
+  automatically in each mod and sent to the crew. In the seat that is *not* flying, the new option
+  *Move my cockpit controls with the pilot's inputs* feeds them in as joystick input so your stick
+  moves like the pilot's (off at every start, pauses an axis when you move your own control).
+  It never runs in the first seat (where the injected input really flies the aircraft) and finds by
+  itself which input each mod reads for every axis (OH-6A: pitch inverted, collective on the thrust axis).
+- **All UCS logs in `Saved Games\DCS\Logs\UCS`**: the client log is now saved automatically
+  (`UCS-Client.log`, previous session `UCS-Client.old.log`).
+- Tested in DCS (single player and a private multiplayer server, OH-6A): switch sync both ways,
+  late-join state, flight-control mirror and calibration, seat 1 lock. Still to be tested with two
+  players: the mirror in seat 2 (see `docs/PENDING-TESTS.md`).
+- **Diagnostic recording:** per-frame CSV in `Saved Games\DCS\Logs\UCS\UCS-diag-*.csv` and a log of
+  cockpit animations that flicker between two positions.
+- **Fix:** switches that a mod implements as toggles (e.g. UH-60L doors) could end up inverted when a
+  crew member joined; UCS now skips commands for switches already in the requested position.
+- Profiles made by 0.1.0/0.1.1 are regenerated once to add the flight controls (same fingerprint,
+  so crew members still on 0.1.1 keep syncing switches).
+- `SHA256SUMS.txt` uses LF line endings (`sha256sum -c` works).
+- First release that 0.1.1-alpha can install through the in-app updater.
+
+Flight controls need UCS-Server 0.1.2-alpha; older servers keep syncing switches.
 
 ## Quick test
 

@@ -7,7 +7,7 @@
 #define AppName "DCS-UCS"
 #define AppFullName "DCS-UCS (Universal Control Sync)"
 #ifndef AppVersion
-  #define AppVersion "0.1.1-alpha"
+  #define AppVersion "0.1.2-alpha"
 #endif
 #define AppPublisher "DCS-UCS contributors"
 #define AppURL "https://github.com/LR-Almeida/DCS-UCS"
