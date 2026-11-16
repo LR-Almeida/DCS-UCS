@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using UCS.Common;
 
 namespace UCS.Server;
 
@@ -48,7 +49,7 @@ public sealed class ServerConfig
                 return new ServerConfig();
             }
         }
-        var def = new ServerConfig();
+        var def = new ServerConfig().Validate();
         try
         {
             File.WriteAllText(path, JsonSerializer.Serialize(def, Options));
@@ -69,6 +70,9 @@ public sealed class ServerConfig
         if (MaxPacketsPerSecond < 10) MaxPacketsPerSecond = 200;
         if (StatusIntervalSeconds < 5) StatusIntervalSeconds = 60;
         if (!SessionMatch.Equals("Group", StringComparison.OrdinalIgnoreCase)) SessionMatch = "Unit";
+        // Connections turned off in the installer stay off
+        if (!InstallOptions.CheckForUpdatesAllowed) CheckForUpdates = false;
+        if (!InstallOptions.DetectPublicIpAllowed) DetectPublicIp = false;
         return this;
     }
 }

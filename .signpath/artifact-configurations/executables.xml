@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "executables" (slug used by .github/workflows/build.yml).
+  Paste it into the SignPath project when it is approved; SignPath validates the syntax.
+  The GitHub artifact is a zip with the three single-file executables.
+  Metadata restrictions (SignPath Foundation rule): product name = project name, product version = release version.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="UCS-Client.exe" product-name="DCS-UCS" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="UCS-Server.exe" product-name="DCS-UCS" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="UCS-ProfileGen.exe" product-name="DCS-UCS" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

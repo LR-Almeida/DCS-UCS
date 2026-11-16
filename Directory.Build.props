@@ -2,7 +2,10 @@
   <PropertyGroup>
     <Version>0.1.2-alpha</Version>
     <Authors>DCS-UCS contributors</Authors>
-    <Product>DCS-UCS (Universal Control Sync)</Product>
+    <Product>DCS-UCS</Product>
+    <Description>DCS-UCS (Universal Control Sync)</Description>
+    <!-- Same product version in every file (SignPath metadata rules): no "+commit" suffix -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Copyright>MIT License</Copyright>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>

@@ -2,6 +2,13 @@
 
 Thanks for helping! Bug reports, test results and code contributions are all welcome.
 
+## Reviews and code signing
+
+The repository owner is the only committer. Every pull request is reviewed before it is merged, and
+release binaries are built only by the GitHub Actions workflow (see the
+[code signing policy](README.md#code-signing-policy)). Pull requests that change the build or release
+workflow get extra scrutiny.
+
 ## Aircraft profile policy (please read)
 
 DCS-UCS **does not publish or distribute aircraft profiles**, for any mod.

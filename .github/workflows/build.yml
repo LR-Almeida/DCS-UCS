@@ -17,6 +17,9 @@ jobs:
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
+      # Code signing (SignPath Foundation): only for release tags, and only once the repository variable
+      # SIGNPATH_ORGANIZATION_ID exists (see docs/SIGNING.md). Until then releases are built unsigned.
+      SIGN: ${{ startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != '' }}
 
     steps:
       - name: Checkout
@@ -48,9 +51,43 @@ jobs:
           New-Item -ItemType Directory -Force publish/Lua, publish/Server-Files | Out-Null
           Copy-Item src/Lua/UCS-Hook.lua, src/Lua/UCS-Export.lua publish/Lua/
           Copy-Item src/Lua/UCS-ServerHook.lua, Server-Files/UCS-AutoConnect.cfg publish/Server-Files/
-          Copy-Item README.md, LICENSE publish/
+          Copy-Item README.md, LICENSE, PRIVACY.md publish/
           Remove-Item publish/*.pdb -ErrorAction SilentlyContinue
           Get-ChildItem publish
+
+      - name: Upload unsigned executables (signing)
+        if: env.SIGN == 'true'
+        id: unsigned-exes
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-executables
+          path: |
+            publish/UCS-Client.exe
+            publish/UCS-Server.exe
+            publish/UCS-ProfileGen.exe
+
+      - name: Sign executables (SignPath, manual approval)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: executables
+          github-artifact-id: ${{ steps.unsigned-exes.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 7200
+          output-artifact-directory: signed-executables
+          parameters: |
+            version: "${{ steps.version.outputs.value }}"
+
+      - name: Use signed executables
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          Copy-Item signed-executables/*.exe publish/ -Force
+          Get-ChildItem publish/*.exe | ForEach-Object { "{0}: {1}" -f $_.Name, (Get-AuthenticodeSignature $_.FullName).Status }
 
       - name: Install Inno Setup 7 (pinned + checksum)
         shell: pwsh
@@ -72,6 +109,37 @@ jobs:
         run: |
           & $env:ISCC /Q "/DAppVersion=${{ steps.version.outputs.value }}" installer/UCS-Installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload unsigned installer (signing)
+        if: env.SIGN == 'true'
+        id: unsigned-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: installer/Output/DCS-UCS-Setup-${{ steps.version.outputs.value }}.exe
+
+      - name: Sign installer (SignPath, manual approval)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 7200
+          output-artifact-directory: signed-installer
+          parameters: |
+            version: "${{ steps.version.outputs.value }}"
+
+      - name: Use signed installer
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          Copy-Item signed-installer/*.exe installer/Output/ -Force
+          Get-ChildItem installer/Output/*.exe | ForEach-Object { "{0}: {1}" -f $_.Name, (Get-AuthenticodeSignature $_.FullName).Status }
 
       - name: Portable zip
         shell: pwsh

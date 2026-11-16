@@ -453,7 +453,12 @@ public sealed class MainForm : Form
         _connectOnStart.Checked = c.ConnectOnStartup;
         _autoProfiles.Checked = c.AutoGenerateProfiles;
         _autoPilot.Checked = c.AutoDetectPilotName;
-        _chkUpdates.Checked = c.CheckForUpdates;
+        _chkUpdates.Checked = c.CheckForUpdates && InstallOptions.CheckForUpdatesAllowed;
+        if (!InstallOptions.CheckForUpdatesAllowed)
+        {
+            _chkUpdates.Enabled = false;
+            _chkUpdates.Text = "Check for updates automatically (turned off in the installer - run Setup again to change)";
+        }
         _chkPre.Checked = c.IncludePreReleases;
         _pilot.Enabled = !c.AutoDetectPilotName;
         _room.Text = c.ManualRoom;
@@ -478,7 +483,7 @@ public sealed class MainForm : Form
         c.ConnectOnStartup = _connectOnStart.Checked;
         c.AutoGenerateProfiles = _autoProfiles.Checked;
         c.AutoDetectPilotName = _autoPilot.Checked;
-        c.CheckForUpdates = _chkUpdates.Checked;
+        c.CheckForUpdates = _chkUpdates.Checked && InstallOptions.CheckForUpdatesAllowed;
         c.IncludePreReleases = _chkPre.Checked;
         c.ManualRoom = _room.Text.Trim();
         c.PilotName = string.IsNullOrWhiteSpace(_pilot.Text) ? "Pilot" : _pilot.Text.Trim();

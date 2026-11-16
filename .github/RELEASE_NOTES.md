@@ -1,5 +1,8 @@
 > ⚠️ **Alpha release — for testing only.** Not yet validated in DCS on real multicrew flights. Expect bugs; please report them (see CONTRIBUTING.md for what to include).
 
+[Code signing policy](https://github.com/LR-Almeida/DCS-UCS#code-signing-policy) ·
+[Privacy policy](https://github.com/LR-Almeida/DCS-UCS/blob/main/PRIVACY.md)
+
 ## Downloads
 
 | File | What it is |

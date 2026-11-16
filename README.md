@@ -7,6 +7,8 @@
 **Free, open-source and decentralized multicrew cockpit synchronization for DCS World community mods.**
 
 > ⚠️ **Alpha** — under active testing. See [Releases](https://github.com/LR-Almeida/DCS-UCS/releases) and report issues.
+>
+> [Code signing policy](#code-signing-policy) · [Privacy policy](PRIVACY.md)
 
 Many great community aircraft (helicopters, transports, trainers…) have no native multicrew.
 DCS-UCS mirrors cockpit switches, buttons and knobs between crew members — in the spirit of
@@ -243,6 +245,9 @@ Logs may contain player names and server addresses: review them before posting p
 
 ## Privacy
 
+Full text: **[Privacy policy](PRIVACY.md)** (also shown by the installer, which lets you turn off the
+update check and the public IP lookup).
+
 DCS-UCS has no telemetry and no central service. The only network connections are:
 
 | Connection | Who | Purpose | How to turn it off |
@@ -296,6 +301,28 @@ DCS-UCS/
 | `ERRO DE COMPATIBILIDADE` | Crew must use the same mod version; if equal, delete the profile in `%APPDATA%\DCS-UCS\profiles` on both PCs |
 | Switch moves but systems don't react | Open an issue (mod, version, argument id); some mods need generator fixes |
 | Server blocks `LoGetSelfData` (export restrictions) | UCS uses the aircraft type reported by the GameGUI hook instead |
+
+## Code signing policy
+
+Windows releases are planned to be signed through the SignPath Foundation open-source program
+(application in progress; until then the files are unsigned and SmartScreen may warn):
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)
+
+- Signed files: `UCS-Client.exe`, `UCS-Server.exe`, `UCS-ProfileGen.exe` and the `DCS-UCS-Setup-*.exe` installer
+  of each [release](https://github.com/LR-Almeida/DCS-UCS/releases). They are built only by the public
+  [GitHub Actions workflow](.github/workflows/build.yml) from the tagged source code of this repository.
+- Each release must be approved manually before it is signed.
+- Team roles:
+  - Committers and reviewers: [repository owner](https://github.com/LR-Almeida) — the only person with write
+    access; every pull request from other contributors is reviewed before merging.
+  - Approvers: [repository owner](https://github.com/LR-Almeida).
+- All team members use multi-factor authentication on GitHub and SignPath.
+- Privacy: see the [privacy policy](PRIVACY.md). DCS-UCS only contacts the UCS server you choose, GitHub (update
+  check, can be turned off) and a public IP service on PCs that host a server (can be turned off); it has no
+  telemetry.
+- Contents: only code from this repository and the .NET runtime / NuGet packages listed in the project files
+  (MoonSharp, MIT license). Report suspected abuse in the [issues](https://github.com/LR-Almeida/DCS-UCS/issues).
 
 ## License
 

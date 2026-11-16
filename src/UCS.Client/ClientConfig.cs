@@ -73,7 +73,7 @@ public sealed class ClientConfig
                     cfg.PilotName = string.IsNullOrWhiteSpace(cfg.PilotName) ? "Pilot" : cfg.PilotName;
                     if (string.IsNullOrWhiteSpace(cfg.FlightAxisCommands) || cfg.FlightAxisCommands == OldDefaultFlightAxisCommands)
                         cfg.FlightAxisCommands = DefaultFlightAxisCommands;
-                    return cfg;
+                    return cfg.ApplyInstallOptions();
                 }
             }
         }
@@ -81,7 +81,14 @@ public sealed class ClientConfig
         {
             // fall through to defaults
         }
-        return new ClientConfig();
+        return new ClientConfig().ApplyInstallOptions();
+    }
+
+    /// <summary>Automatic update checks turned off in the installer stay off ("Check now" still works: user request).</summary>
+    public ClientConfig ApplyInstallOptions()
+    {
+        if (!InstallOptions.CheckForUpdatesAllowed) CheckForUpdates = false;
+        return this;
     }
 
     public void Save()

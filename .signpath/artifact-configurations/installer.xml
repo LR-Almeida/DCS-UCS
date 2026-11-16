@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "installer" (slug used by .github/workflows/build.yml).
+  The GitHub artifact is a zip with DCS-UCS-Setup-<version>.exe (Inno Setup 7, already containing the
+  signed executables). Inno Setup pads its version strings with spaces: if SignPath rejects the exact
+  product-name/product-version match, check the values it reports and adjust here.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="DCS-UCS-Setup-*.exe" product-name="DCS-UCS" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

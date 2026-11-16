@@ -10,6 +10,13 @@
   #define AppVersion "0.1.2-alpha"
 #endif
 #define AppPublisher "DCS-UCS contributors"
+; Numeric x.y.z.0 for the Windows version resource ("0.1.2-alpha" -> "0.1.2.0")
+#define DashPos Pos("-", AppVersion)
+#if DashPos > 0
+  #define AppNumVersion Copy(AppVersion, 1, DashPos - 1) + ".0"
+#else
+  #define AppNumVersion AppVersion + ".0"
+#endif
 #define AppURL "https://github.com/LR-Almeida/DCS-UCS"
 
 [Setup]
@@ -25,6 +32,17 @@ DefaultDirName={autopf}\DCS-UCS
 DefaultGroupName=DCS-UCS
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
+; Privacy policy shown during installation (network connections can be turned off in the next pages)
+InfoBeforeFile=..\PRIVACY.md
+; Version resource: same product name and version in every signed file (SignPath metadata rules)
+VersionInfoProductName=DCS-UCS
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoProductVersion={#AppNumVersion}
+VersionInfoTextVersion={#AppVersion}
+VersionInfoVersion={#AppNumVersion}
+VersionInfoCompany={#AppPublisher}
+VersionInfoDescription=DCS-UCS Setup
+VersionInfoCopyright=MIT License
 OutputDir=Output
 OutputBaseFilename=DCS-UCS-Setup-{#AppVersion}
 Compression=lzma2/max
@@ -48,6 +66,8 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 [Tasks]
 Name: "dcsclient"; Description: "Configure DCS World client (Saved Games\DCS and DCS.openbeta): UCS-Hook.lua, UCS-Export.lua and Export.lua injection"; GroupDescription: "DCS integration:"
 Name: "dcsserverhook"; Description: "Install UCS-ServerHook.lua (only if THIS machine hosts a DCS server - SRS-style auto-connect)"; GroupDescription: "DCS integration:"; Flags: unchecked
+Name: "netupdates"; Description: "Check for DCS-UCS updates on GitHub (api.github.com) - client and server"; GroupDescription: "Network connections (see the privacy policy):"
+Name: "netpublicip"; Description: "Let UCS-Server and the DCS server hook detect this PC's public IP address (api.ipify.org)"; GroupDescription: "Network connections (see the privacy policy):"
 Name: "firewall"; Description: "Open UDP port 5055 in Windows Firewall (only if this machine runs UCS-Server.exe)"; GroupDescription: "Network:"; Flags: unchecked
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
@@ -61,6 +81,7 @@ Source: "..\src\Lua\UCS-ServerHook.lua"; DestDir: "{app}\Server-Files"; Flags: i
 Source: "..\Server-Files\UCS-AutoConnect.cfg"; DestDir: "{app}\Server-Files"; Flags: onlyifdoesntexist
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\PRIVACY.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\UCS Client"; Filename: "{app}\UCS-Client.exe"
@@ -68,6 +89,7 @@ Name: "{group}\UCS Server"; Filename: "{app}\UCS-Server.exe"
 Name: "{group}\UCS Profile Generator (help)"; Filename: "{cmd}"; Parameters: "/k ""{app}\UCS-ProfileGen.exe"" --help"; WorkingDir: "{app}"
 Name: "{group}\Server Files folder"; Filename: "{app}\Server-Files"
 Name: "{group}\README"; Filename: "{app}\README.md"
+Name: "{group}\Privacy policy"; Filename: "{app}\PRIVACY.md"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\UCS Client"; Filename: "{app}\UCS-Client.exe"; Tasks: desktopicon
 
@@ -78,6 +100,9 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""D
 Filename: "{app}\UCS-Client.exe"; Description: "{cm:LaunchProgram,UCS Client}"; Flags: nowait postinstall skipifsilent
 ; reopen the client after an in-app update, as the normal (non-elevated) user
 Filename: "{app}\UCS-Client.exe"; Flags: nowait runasoriginaluser; Check: IsInAppUpdate
+
+[UninstallDelete]
+Type: files; Name: "{app}\install-options.ini"
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""DCS-UCS Server"""; Flags: runhidden; RunOnceId: "DelFirewall"
@@ -197,6 +222,33 @@ begin
   Result[4] := 'DCS.release_server';
 end;
 
+{ "Detect public IP" unchecked -> the server hook never contacts api.ipify.org }
+procedure SetPublicIpOption(const Cfg: String);
+var
+  Raw: AnsiString;
+  S: String;
+begin
+  if not LoadStringFromFile(Cfg, Raw) then Exit;
+  S := String(Raw);
+  StringChangeEx(S, 'DetectPublicIp=false' + #13#10, '', True);
+  if not WizardIsTaskSelected('netpublicip') then
+    S := S + 'DetectPublicIp=false' + #13#10;
+  SaveStringToFile(Cfg, AnsiString(S), False);
+end;
+
+{ Network choices for UCS-Client.exe / UCS-Server.exe (see InstallOptions.cs) }
+procedure WriteInstallOptions();
+var
+  S: String;
+begin
+  S := '; DCS-UCS installer choices. Run Setup again to change them.' + #13#10;
+  if WizardIsTaskSelected('netupdates') then S := S + 'CheckForUpdates=1' + #13#10
+  else S := S + 'CheckForUpdates=0' + #13#10;
+  if WizardIsTaskSelected('netpublicip') then S := S + 'DetectPublicIp=1' + #13#10
+  else S := S + 'DetectPublicIp=0' + #13#10;
+  SaveStringToFile(ExpandConstant('{app}\install-options.ini'), AnsiString(S), False);
+end;
+
 procedure InstallServerHookInto(const Base: String);
 var
   Cfg, Addr: String;
@@ -209,6 +261,7 @@ begin
     SaveStringToFile(Cfg, '# DCS-UCS Auto-Connect: address of the UCS-Server.exe for this DCS server' + #13#10 + Addr + #13#10, False)
   else if not FileExists(Cfg) then
     FileCopy(ExpandConstant('{app}\Server-Files\UCS-AutoConnect.cfg'), Cfg, True);
+  SetPublicIpOption(Cfg);
 end;
 
 procedure InstallServerHook();
@@ -292,6 +345,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    WriteInstallOptions();
     if WizardIsTaskSelected('dcsclient') then InstallClient();
     if WizardIsTaskSelected('dcsserverhook') then InstallServerHook();
   end;

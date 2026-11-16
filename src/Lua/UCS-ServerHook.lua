@@ -34,33 +34,41 @@ local function hookDir()
     return dir
 end
 
+-- Returns the configured address ("" = auto-detect) and whether the public IP may be looked up
+-- (line "DetectPublicIp=false" turns the api.ipify.org request off; the local IP is used instead).
 local function readConfig()
     local path = hookDir() .. "UCS-AutoConnect.cfg"
     local f = io.open(path, "r")
     if not f then
         log("config not found (" .. path .. "), using auto-detection")
-        return ""
+        return "", true
     end
     local value = ""
+    local detectPublic = true
     for line in f:lines() do
         local l = trim(line)
         if l ~= "" and string.sub(l, 1, 1) ~= "#" and string.sub(l, 1, 1) ~= ";" then
-            value = l
-            break
+            local opt = string.match(l, "^[Dd]etect[Pp]ublic[Ii]p%s*=%s*(%a+)")
+            if opt then
+                detectPublic = string.lower(opt) ~= "false" and opt ~= "0" and string.lower(opt) ~= "no"
+            elseif value == "" then
+                value = l
+            end
         end
     end
     f:close()
-    return value
+    return value, detectPublic
 end
 
-local function detectAddress()
+local function detectAddress(detectPublic)
     local ip = nil
     local ok = pcall(function()
         package.path  = package.path  .. ";.\\LuaSocket\\?.lua"
         package.cpath = package.cpath .. ";.\\LuaSocket\\?.dll"
         local socket = require("socket")
         -- Public IP (short timeout; runs once)
-        local okHttp, http = pcall(require, "socket.http")
+        local okHttp, http = false, nil
+        if detectPublic then okHttp, http = pcall(require, "socket.http") end
         if okHttp and http then
             http.TIMEOUT = 3
             local body, code = http.request("http://api.ipify.org")
@@ -87,9 +95,9 @@ end
 
 local function resolveAddress()
     if UCSServer.address then return UCSServer.address end
-    local cfg = readConfig()
+    local cfg, detectPublic = readConfig()
     if cfg == "" then
-        cfg = detectAddress()
+        cfg = detectAddress(detectPublic)
     end
     if not string.find(cfg, ":", 1, true) then
         cfg = cfg .. ":" .. tostring(UCSServer.defaultPort)
@@ -99,8 +107,12 @@ local function resolveAddress()
     return cfg
 end
 
+-- Only a multiplayer host announces a UCS server (DCS.isServer() is also true in single player,
+-- where nothing must be contacted).
 local function isServer()
-    local ok, res = pcall(function() return DCS.isServer() end)
+    local ok, res = pcall(function()
+        return DCS.isServer() and (DCS.isMultiplayer == nil or DCS.isMultiplayer())
+    end)
     return ok and res == true
 end
 
