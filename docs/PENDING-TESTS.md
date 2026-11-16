@@ -10,7 +10,7 @@ The updater needs a newer release to update **to**, so the first real test happe
 
 - [x] Automatic check at startup finds the new version and shows the pop-up (0.1.1 -> 0.1.2, 2026-11-16)
 - [x] **Update now** (DCS closed): download, SHA-256 OK, UAC prompt, silent install, client reopens (not elevated)
-- [ ] **Close DCS and update**: DCS comes to the front showing its exit confirmation; after confirming,
+- [x] **Close DCS and update** (0.1.2 -> 0.1.3, 2026-11-16): DCS comes to the front showing its exit confirmation; after confirming,
       DCS closes normally (never killed) and the update installs
 - [ ] **Close DCS and update**, exit NOT confirmed within 2 minutes: switches to "update when DCS closes"
 - [ ] Same in the main menu and inside a mission (confirmation box may differ)
@@ -24,6 +24,7 @@ The updater needs a newer release to update **to**, so the first real test happe
 - [ ] After updating with DCS open: client warns that DCS runs older scripts until restarted
 - [ ] `SHA256SUMS.txt` present in the release; tampered/mismatched file is rejected
 - [ ] UCS-Server prints the "new version available" notice
+- [x] Silent update to 0.1.3 writes install-options.ini with the new network options on (defaults)
 
 ## Backward compatibility (new client ↔ older server)
 
