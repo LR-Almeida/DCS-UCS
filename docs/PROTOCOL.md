@@ -46,11 +46,14 @@ flight model (`mainpanel_init.lua` "parameter" gauges such as `CYCLIC_PITCH_COCK
 fighting over one argument), so UCS mirrors them differently:
 
 - Every seat sends its flight args (`FLT` → `flight` message, separate rate budget on the server).
-- **Injection (opt-in, off at every client start, never in seat 1):** the seat that is *not* flying
-  feeds the received positions into DCS as joystick input (`LoSetCommand(cmd, -1..1)`), so the mod
-  itself animates that seat's stick like the pilot's. In the seat that has the controls this really
-  flies the aircraft (verified in single player), so the client only enables it when the hook reports
-  seat 2+ (`slot` "123_2"). Each axis has candidate commands (`client_config.json` →
+- **Injection (automatic, on by default):** the seat that is *not* flying feeds the received positions
+  into DCS as joystick input (`LoSetCommand(cmd, -1..1)`), so the mod itself animates that seat's stick
+  like the pilot's. In the seat that has the controls this really flies the aircraft (verified in single
+  player), so the Export checks **every frame** `LoGetHelicopterFMData()` / `LoGetFMData()`.`master`
+  ("player is actually in control of flight model for multiplayer multicrew sessions", DCS
+  `Scripts/Export.lua`) and injects only while it is `false`. Without that flag (single player, or the
+  server restricts ownship export) it falls back to the seat: `LoGetPlayerSeat()` > 0, else the hook's
+  seat > 1. The Export reports `CTRL|master|seat|mirroring`; the seat that mirrors sends no `FLT`. Each axis has candidate commands (`client_config.json` →
   `FlightAxisCommands`, `axis=cmd[:-1],cmd...`): the Export tries them in order until the animation
   follows a clear deflection (0.6 s each) and logs the one it keeps. Command ids read from the DCS input
   environment: 2001 pitch, 2002 roll, 2003 rudder, 2004 thrust, 2087 `iCommandPlaneCollective`.

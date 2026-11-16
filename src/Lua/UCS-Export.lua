@@ -26,21 +26,25 @@
 --  animates them from its own flight model, so they use a separate channel.
 --    Client -> Export
 --      FLIGHT|<arg>:<axis>:<min>:<max>;...       flight-control animation args
---      FMODE|<send>|<inject>|<diag>|<axis>=<cmd>:<sign>,<cmd>:<sign>;...   (candidates)
+--      FMODE|<send>|<inject 0/1/2>|<diag>|<axis>=<cmd>:<sign>,...;...|<hook seat>
+--            inject 1 = automatic: only while this seat does NOT have the controls
+--            inject 2 = forced (tests only, also with the controls)
 --      FSET|<arg>=<val>;...                      flight args of whoever is flying
 --    Export -> Client
 --      FLT|<arg>=<val>;...                       local flight args (~30 Hz, on change)
 --      DIAG|<text>                               diagnostic messages for the client log
+--      CTRL|<master 1/0/?>|<seat 0-based/?>|<mirroring 0/1>   who has the controls (on change + every 2 s)
 --
---  "inject" (experimental, off by default) feeds the received stick position into this
---  seat as joystick input (LoSetCommand) so the mod animates the stick like the pilot's.
---  It pauses by itself when the local stick is moved. Only for the seat NOT flying.
+--  "inject" (experimental) feeds the received stick position into this seat as joystick input
+--  (LoSetCommand) so the mod animates the stick like the pilot's. Automatic: it runs only while
+--  DCS says this seat is NOT in control of the flight model (LoGetFMData().master == false in
+--  multicrew); when that flag is unavailable, only in a seat other than the first one.
 --  "diag" writes Saved Games\DCS\Logs\UCS\UCS-diag-<time>.csv (every frame) and reports
 --  flickering cockpit arguments (two sources fighting over the same animation).
 -- =============================================================================
 
 local UCS = {
-    version       = "0.1.2-alpha",
+    version       = "0.1.3-alpha",
     host          = "127.0.0.1",
     sendPort      = 5051,
     listenPort    = 5052,
@@ -66,7 +70,13 @@ UCS.forceAll     = false
 -- Flight-control channel
 UCS.flight       = {}        -- list of { arg=, axis=, min=, max= }
 UCS.fsend        = false
-UCS.finject      = false
+UCS.finject      = false     -- mirror enabled by the client (automatic)
+UCS.fforce       = false     -- tests only: inject even with the controls
+UCS.hookSeat     = nil       -- seat reported by the GameGUI hook (1-based), fallback
+UCS.master       = nil       -- true/false: this seat controls the flight model (nil = unknown)
+UCS.seat         = nil       -- LoGetPlayerSeat() (0-based, nil = unknown)
+UCS.mirroring    = false
+UCS.nextCtrlSend = 0
 UCS.fdiag        = false
 UCS.fcmds        = {}        -- axis -> { cmd=, sign= }
 UCS.fremote      = {}        -- arg -> latest received value
@@ -293,7 +303,9 @@ local function handleMessage(msg)
         log("Flight-control args: " .. #list)
     elseif kind == "FMODE" then
         UCS.fsend = parts[2] == "1"
-        local inject = parts[3] == "1"
+        local inject = parts[3] == "1" or parts[3] == "2"
+        UCS.fforce = parts[3] == "2"
+        UCS.hookSeat = tonumber(parts[6] or "")
         local diag = parts[4] == "1"
         -- axis=cmd:sign,cmd:sign;...  (candidates in order, see calibrate())
         local cmds = {}
@@ -405,8 +417,58 @@ local function toAxis(f, v)
     return n
 end
 
+-- -----------------------------------------------------------------------------
+-- Who has the controls
+-- -----------------------------------------------------------------------------
+local function readControl()
+    local master, seat = nil, nil
+    for _, fn in ipairs({ "LoGetHelicopterFMData", "LoGetFMData" }) do
+        local f = _G[fn]
+        if master == nil and type(f) == "function" then
+            local ok, fm = pcall(f)
+            if ok and type(fm) == "table" and type(fm.master) == "boolean" then master = fm.master end
+        end
+    end
+    if type(LoGetPlayerSeat) == "function" then
+        local ok, n = pcall(LoGetPlayerSeat)
+        if ok and type(n) == "number" then seat = n end
+    end
+    return master, seat
+end
+
+-- The mirror runs only in a seat that does not fly the aircraft.
+local function mirrorAllowed()
+    if not UCS.finject then return false end
+    if UCS.fforce then return true end
+    if UCS.master ~= nil then return not UCS.master end
+    if UCS.seat ~= nil then return UCS.seat > 0 end
+    if UCS.hookSeat ~= nil then return UCS.hookSeat > 1 end
+    return false
+end
+
+local function updateControl(t)
+    -- every frame: the mirror must stop on the very frame this seat takes the controls
+    local master, seat = readControl()
+    local changed = master ~= UCS.master or seat ~= UCS.seat
+    UCS.master, UCS.seat = master, seat
+    local mirroring = mirrorAllowed()
+    if mirroring ~= UCS.mirroring then
+        changed = true
+        UCS.mirroring = mirroring
+        -- start each mirror period clean (pauses, calibration of axes that never followed)
+        UCS.injected, UCS.injectOff = {}, {}
+        UCS.axisPause, UCS.axisPauses = {}, {}
+        log("Flight input mirror " .. (mirroring and "ACTIVE (this seat does not have the controls)" or "inactive"))
+    end
+    if changed or t >= UCS.nextCtrlSend then
+        UCS.nextCtrlSend = t + 2
+        send("CTRL|" .. (master == nil and "?" or (master and "1" or "0")) .. "|" ..
+            (seat == nil and "?" or tostring(seat)) .. "|" .. (mirroring and "1" or "0"))
+    end
+end
+
 local function sendFlight(cockpit, t)
-    if not UCS.fsend or UCS.finject or #UCS.flight == 0 or t < UCS.nextFlt then return end
+    if not UCS.fsend or UCS.mirroring or #UCS.flight == 0 or t < UCS.nextFlt then return end
     UCS.nextFlt = t + UCS.fltInterval
     local out = {}
     for i = 1, #UCS.flight do
@@ -451,7 +513,7 @@ local function calibrate(f, axis, cands, cal, la, target, t)
 end
 
 local function injectFlight(cockpit, t)
-    if not UCS.finject or #UCS.flight == 0 then return end
+    if not UCS.mirroring or #UCS.flight == 0 then return end
     if t - UCS.fremoteAt > 0.5 then return end          -- stream stopped: leave inputs alone
     for i = 1, #UCS.flight do
         local f = UCS.flight[i]
@@ -513,7 +575,7 @@ diagOpen = function()
         local name = dir .. [[\UCS-diag-]] .. os.date("%Y%m%d-%H%M%S") .. ".csv"
         local file = io.open(name, "w")
         if not file then error("cannot create " .. name) end
-        local cols = { "wall", "model_time", "frame_ms", "inject", "paused" }
+        local cols = { "wall", "model_time", "frame_ms", "mirroring", "paused", "master", "seat" }
         for i = 1, #UCS.flight do
             local f = UCS.flight[i]
             table.insert(cols, "a" .. f.arg .. "_" .. f.axis .. "_local")
@@ -572,7 +634,8 @@ local function diagFrame(cockpit, t)
     local okm, mt = pcall(LoGetModelTime)
     local row = {
         string.format("%.3f", t), string.format("%.3f", (okm and mt) or 0), string.format("%.1f", frameMs),
-        UCS.finject and "1" or "0", pausedAxes(t),
+        UCS.mirroring and "1" or "0", pausedAxes(t),
+        UCS.master == nil and "" or (UCS.master and "1" or "0"), UCS.seat == nil and "" or tostring(UCS.seat),
     }
     for i = 1, #UCS.flight do
         local f = UCS.flight[i]
@@ -670,6 +733,7 @@ LuaExportAfterNextFrame = function()
             local cockpit = GetDevice(0)
             if cockpit then
                 local w = wall()
+                updateControl(w)
                 sendFlight(cockpit, w)
                 injectFlight(cockpit, w)
                 if UCS.diag then diagFrame(cockpit, w) end
@@ -687,6 +751,7 @@ LuaExportStop = function()
     diagClose()
     UCS.fdiag = false
     UCS.finject = false
+    UCS.mirroring = false
     UCS.udp = nil
     UCS.active = false
     UCS.profile = nil

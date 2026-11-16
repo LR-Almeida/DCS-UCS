@@ -8,8 +8,8 @@ result) when tested.
 The updater needs a newer release to update **to**, so the first real test happens when the release
 *after* the one that introduced it is published (e.g. installed 0.1.1-alpha → update to 0.1.2-alpha).
 
-- [ ] Automatic check at startup finds the new version and shows the pop-up
-- [ ] **Update now** (DCS closed): download, SHA-256 OK, UAC prompt, silent install, client reopens (not elevated)
+- [x] Automatic check at startup finds the new version and shows the pop-up (0.1.1 -> 0.1.2, 2026-11-16)
+- [x] **Update now** (DCS closed): download, SHA-256 OK, UAC prompt, silent install, client reopens (not elevated)
 - [ ] **Close DCS and update**: DCS comes to the front showing its exit confirmation; after confirming,
       DCS closes normally (never killed) and the update installs
 - [ ] **Close DCS and update**, exit NOT confirmed within 2 minutes: switches to "update when DCS closes"
@@ -19,7 +19,7 @@ The updater needs a newer release to update **to**, so the first real test happe
 - [ ] **Skip this version**: no pop-up on the next automatic check; *Check now* still shows it
 - [ ] **Remind me later**: pop-up returns on the next automatic check (startup / 6 h)
 - [ ] UAC denied → "Update cancelled", client keeps running
-- [ ] Silent update keeps previous installer choices (DCS scripts re-copied to Saved Games, server hook,
+- [x] Silent update keeps previous installer choices (DCS scripts re-copied to Saved Games, server hook,
       firewall rule not duplicated) and `Export.lua` still has exactly one UCS line
 - [ ] After updating with DCS open: client warns that DCS runs older scripts until restarted
 - [ ] `SHA256SUMS.txt` present in the release; tampered/mismatched file is rejected
@@ -66,9 +66,14 @@ Still needs two players:
 - [ ] Log tab lists the flickering args reported by the diagnostic (UH-60L doors, cyclic)
 - [ ] UH-60L doors stop flickering once both seats run UCS (doors are clickable and synced)
 - [ ] Mirror ON in the seat NOT flying: stick / pedals / collective follow the pilot, no flicker
-- [ ] Mirror ON in seat 2 without the controls does NOT fly the aircraft (critical)
-- [ ] Hook reports seat 2 for the copilot ("Multicrew seat: 2" in the log); mirror inactive in seat 1
-- [ ] What happens after the copilot takes the controls (C key) with the mirror still ON
+- [ ] Mirror in seat 2 without the controls does NOT fly the aircraft (critical)
+- [x] OH-6A as multiplayer host, seat 1 (2026-11-16): `LoGetHelicopterFMData().master` and `LoGetFMData().master`
+      = true, `LoGetPlayerSeat()` = 0, ownship export allowed; client logs "You have the controls", mirror inactive
+- [ ] `master` flag works for the mod: log "A crew member has the controls" in seat 2 and "You have the
+      controls" in seat 1 (otherwise "DCS does not report who has the controls")
+- [ ] Control handover with C: mirror stops on the seat that takes the controls, starts on the other one,
+      both ways; the aircraft does not jump when the controls change hands
+- [ ] Hook reports seat 2 for the copilot ("Multicrew seat: 2" in the log)
 - [ ] Moving the local stick with the mirror ON pauses that axis ("paused 3 s" in the log)
 - [ ] UH-60L calibration (which commands its EFM reads; log lines "uses command ...")
 - [ ] Latency over the internet acceptable (CSV: remote vs local columns)

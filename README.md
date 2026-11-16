@@ -202,11 +202,12 @@ each PC. That is why, in native multicrew, the other seat often sees a frozen st
 flickers between two positions. UCS 0.1.2 adds:
 
 - **Send my stick / pedals / collective positions** (on by default): view-only data for the crew.
-- **Move my cockpit controls with the pilot's inputs** (*experimental, off at every start*): in
-  the seat that is **not** flying, UCS feeds the received positions into DCS as joystick input,
-  so the mod animates your stick like the pilot's. It never runs in the first seat (the one that
-  normally has the controls), finds the right input for each axis by itself, and pauses an axis
-  for 3 s when you move your own control. **Turn it off before taking the controls of the aircraft.**
+- **Move my stick / pedals / collective like the crew member flying** (*automatic, experimental, on by
+  default*): while DCS says your seat does **not** have the controls, UCS feeds the received positions into
+  DCS as joystick input, so the mod animates your stick like the pilot's. It stops on the same frame you
+  take the controls (key C, *Request Aircraft Control*) and resumes when you hand them over. It finds the
+  right input for each axis by itself and pauses an axis for 3 s when you move your own control. If DCS
+  does not report who has the controls (a server can restrict it), it only runs outside the first seat.
 - **Diagnostic recording**: writes `Saved Games\DCS\Logs\UCS\UCS-diag-*.csv` and lists flickering
   cockpit arguments in the Log tab. Please attach it (from both seats) to flight-control reports.
 

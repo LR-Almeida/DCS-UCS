@@ -55,8 +55,8 @@ public sealed class MainForm : Form
     private readonly CheckBox _flSend = new() { Text = "Send my stick / pedals / collective positions to the crew", AutoSize = true };
     private readonly CheckBox _flInject = new()
     {
-        Text = "Move my cockpit controls with the pilot's inputs (EXPERIMENTAL - only in the seat NOT flying)",
-        AutoSize = true, ForeColor = Color.DarkRed,
+        Text = "While I do not have the controls, move my stick / pedals / collective like the crew member flying (automatic, experimental)",
+        AutoSize = true,
     };
     private readonly CheckBox _flDiag = new() { Text = @"Diagnostic recording (Saved Games\DCS\Logs\UCS\UCS-diag-*.csv)", AutoSize = true };
     private readonly Label _flStatus = Value();
@@ -116,26 +116,7 @@ public sealed class MainForm : Form
         _chkUpdates.CheckedChanged += (_, _) => SaveConfig(showMessage: false);
         _flSend.CheckedChanged += (_, _) => { if (!_loadingUi) SaveConfig(showMessage: false); };
         _flDiag.CheckedChanged += (_, _) => { if (!_loadingUi) SaveConfig(showMessage: false); };
-        _flInject.CheckedChanged += (_, _) =>
-        {
-            if (_loadingUi) return;
-            if (_flInject.Checked && MessageBox.Show(this,
-                    "EXPERIMENTAL TEST FEATURE\n\n" +
-                    "The stick / pedals / collective positions received from the crew are fed into THIS seat as joystick input, " +
-                    "so your cockpit controls move like the pilot's.\n\n" +
-                    "- Use it ONLY in the seat that is NOT flying.\n" +
-                    "- Moving your own controls pauses it for 3 seconds.\n" +
-                    "- Turn it OFF before taking the controls of the aircraft.\n" +
-                    "- It is always off when UCS-Client starts.\n\nEnable it?",
-                    "DCS-UCS - flight input mirror", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
-            {
-                _loadingUi = true;
-                _flInject.Checked = false;
-                _loadingUi = false;
-                return;
-            }
-            SaveConfig(showMessage: false);
-        };
+        _flInject.CheckedChanged += (_, _) => { if (!_loadingUi) SaveConfig(showMessage: false); };
         _chkPre.CheckedChanged += (_, _) => SaveConfig(showMessage: false);
         _btnCheck.Click += async (_, _) => await _updates.CheckAsync(manual: true);
         _btnUpdNow.Click += async (_, _) => await _updates.UpdateNowAsync();
@@ -592,9 +573,17 @@ public sealed class MainForm : Form
         else if (s.Connected && !s.FlightServerSupport)
             SetLabel(_flStatus, $"{s.FlightArgs} animations - server too old (needs UCS-Server 0.1.2+)", Color.DarkOrange);
         else
-            SetLabel(_flStatus, $"{s.FlightArgs} animations - seat {s.Seat} - packets sent {s.FlightSent} / received {s.FlightReceived}" +
-                                (s.FlightInjectActive ? " - MIRROR ON" : _flInject.Checked ? " - mirror inactive in seat 1" : ""),
-                     s.FlightInjectActive ? Color.DarkRed : Color.Black);
+        {
+            var who = s.HasControls switch
+            {
+                true => "you have the controls",
+                false => "crew member has the controls",
+                _ => $"seat {s.Seat}",
+            };
+            SetLabel(_flStatus, $"{s.FlightArgs} animations - {who} - packets sent {s.FlightSent} / received {s.FlightReceived}" +
+                                (s.FlightInjectActive ? " - MIRRORING" : ""),
+                     s.FlightInjectActive ? Color.DarkBlue : Color.Black);
+        }
 
         var detected = _autoPilot.Checked
             ? (s.DetectedPilot.Length > 0 ? $"Using \"{s.DetectedPilot}\" (from DCS)" : "Not detected yet - start DCS (using the name above)")
@@ -689,11 +678,11 @@ QUICK START
 FLIGHT CONTROLS (EXPERIMENTAL)
    - "Send my stick / pedals / collective positions": your flight-control positions are sent to
      the crew (view only). Keep it on.
-   - "Move my cockpit controls with the pilot's inputs": ONLY in the seat that is NOT flying.
-     The pilot's positions are fed into your seat as joystick input so your stick moves like
-     theirs. It never runs in the first seat, finds the right input of each axis by itself
-     (see the Log tab), and moving your own controls pauses it for 3 s. Turn it OFF before
-     taking the controls. It is always off when the client starts.
+   - "While I do not have the controls, move my stick...": automatic. While the other crew
+     member has the controls, their stick, pedals and collective are fed into your seat so
+     your cockpit shows what they do. When you take the controls (key C) it stops at once,
+     and it resumes when you hand them back. "Flight:" shows who has the controls. Moving
+     your own controls while it runs pauses that axis for 3 s.
    - "Diagnostic recording": writes Saved Games\DCS\Logs\UCS\UCS-diag-*.csv and lists in the Log
      tab any cockpit animation that flickers. Send the file from both seats with bug reports.
 

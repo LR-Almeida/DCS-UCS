@@ -26,11 +26,11 @@ public sealed class ClientConfig
     /// <summary>Send this seat's stick / pedals / collective positions to the crew (view only).</summary>
     public bool FlightMirrorSend { get; set; } = true;
     /// <summary>
-    /// Feed the received positions into this seat as joystick input, so the mod animates the stick
-    /// like the pilot's. Only for the seat NOT flying. Never saved: off at every start for safety.
+    /// Automatic flight mirror: while this seat does NOT have the controls (DCS multicrew "master" flag),
+    /// the received positions are fed in as joystick input so the mod animates the stick like the pilot's.
+    /// Stops by itself when this seat takes the controls.
     /// </summary>
-    [System.Text.Json.Serialization.JsonIgnore]
-    public bool FlightMirrorInject { get; set; }
+    public bool FlightMirrorInject { get; set; } = true;
     /// <summary>Record flight-control args every frame to Saved Games\DCS\Logs\UCS\UCS-diag-*.csv and report flickering args.</summary>
     public bool FlightDiagnostics { get; set; } = false;
     /// <summary>
@@ -44,8 +44,8 @@ public sealed class ClientConfig
         "pitch=2001:-1,2001:1;roll=2002:1,2002:-1;yaw=2003:1,2003:-1;collective=2087:1,2087:-1,2004:-1,2004:1";
     private const string OldDefaultFlightAxisCommands = "pitch=2001;roll=2002;yaw=2003;collective=2087";
     /// <summary>
-    /// Test only (not in the UI): allow the injection in seat 1 too. Seat 1 normally has the controls, and
-    /// there the injected input really flies the aircraft (verified in single player).
+    /// Test only (not in the UI, never use in flight): inject even while this seat HAS the controls - the
+    /// injected input then really flies the aircraft (verified in single player).
     /// </summary>
     public bool FlightInjectAnySeat { get; set; } = false;
 

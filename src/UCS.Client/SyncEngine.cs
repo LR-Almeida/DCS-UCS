@@ -37,7 +37,8 @@ public sealed record EngineStatus(
     long FlightSent,
     long FlightReceived,
     int Seat,
-    bool FlightInjectActive);
+    bool FlightInjectActive,
+    bool? HasControls);
 
 /// <summary>
 /// Core of UCS-Client: glues the DCS bridge (Export + Hook) to the UCS-Server
@@ -100,9 +101,12 @@ public sealed class SyncEngine : IDisposable
     private bool _flightWarned;
     private int _seat = 1;              // multicrew seat reported by the hook (1 = first seat)
 
-    /// <summary>The injection never runs in seat 1: that seat normally has the controls, and there the injected
-    /// input really flies the aircraft.</summary>
-    private bool InjectAllowed(ClientConfig cfg) => cfg.FlightMirrorInject && (_seat > 1 || cfg.FlightInjectAnySeat);
+    private bool? _hasControls;         // DCS "master" flag reported by the Export (null = unknown)
+    private bool _mirroring;            // the Export is mirroring the crew's flight controls in this seat
+    private bool _controlsReported;
+
+    /// <summary>FMODE inject field: 0 off, 1 automatic (only without the controls), 2 forced (tests only).</summary>
+    private static int InjectMode(ClientConfig cfg) => !cfg.FlightMirrorInject ? 0 : cfg.FlightInjectAnySeat ? 2 : 1;
     private int _connectGeneration;
 
     public event Action<string>? Log;
@@ -141,18 +145,9 @@ public sealed class SyncEngine : IDisposable
         }
         if (roomChanged) SendState();
         if (injectChanged)
-        {
-            bool allowed;
-            int seat;
-            lock (_gate) { allowed = InjectAllowed(_cfg); seat = _seat; }
-            Log?.Invoke(!cfg.FlightMirrorInject
-                ? "Flight input mirror OFF."
-                : allowed
-                    ? "EXPERIMENTAL: flight input mirror ON. The received stick position is fed into THIS seat as joystick input. " +
-                      "Use it only in the seat that is NOT flying; moving your own controls pauses it for 3 s. Turn it off before taking the controls."
-                    : $"Flight input mirror enabled, but it stays INACTIVE in seat {seat} (the first seat has the controls). " +
-                      "It starts when you sit in another seat of a multicrew aircraft.");
-        }
+            Log?.Invoke(cfg.FlightMirrorInject
+                ? "Flight mirror ON (automatic): while you do not have the controls, your stick, pedals and collective follow the crew member flying."
+                : "Flight mirror OFF.");
         if (flightChanged) SendFlightMode();
     }
 
@@ -192,7 +187,8 @@ public sealed class SyncEngine : IDisposable
                 FlightSent: _flightSent,
                 FlightReceived: _flightReceived,
                 Seat: _seat,
-                FlightInjectActive: InjectAllowed(_cfg));
+                FlightInjectActive: _mirroring && _exportActive,
+                HasControls: _hasControls);
         }
     }
 
@@ -563,9 +559,9 @@ public sealed class SyncEngine : IDisposable
             }
             if (cands.Count > 0) cmds.Add($"{kv[0].ToLowerInvariant()}={string.Join(",", cands)}");
         }
-        bool inject;
-        lock (_gate) inject = InjectAllowed(cfg);
-        _bridge.SendToExport($"FMODE|{(cfg.FlightMirrorSend ? 1 : 0)}|{(inject ? 1 : 0)}|{(cfg.FlightDiagnostics ? 1 : 0)}|{string.Join(";", cmds)}");
+        int seat;
+        lock (_gate) seat = _seat;
+        _bridge.SendToExport($"FMODE|{(cfg.FlightMirrorSend ? 1 : 0)}|{InjectMode(cfg)}|{(cfg.FlightDiagnostics ? 1 : 0)}|{string.Join(";", cmds)}|{seat}");
     }
 
     // ---------------------------------------------------------- DCS messages
@@ -694,6 +690,38 @@ public sealed class SyncEngine : IDisposable
                         Values = values,
                     });
                 }
+                break;
+            }
+
+            case "CTRL":
+            {
+                // CTRL|<master 1/0/?>|<seat 0-based/?>|<mirroring 0/1>
+                bool? master = parts.Length > 1 && parts[1] == "1" ? true : parts.Length > 1 && parts[1] == "0" ? false : null;
+                var mirroring = parts.Length > 3 && parts[3] == "1";
+                bool controlsChanged, mirrorChanged, firstReport, mirrorEnabled;
+                lock (_gate)
+                {
+                    _exportLastSeen = Now;
+                    firstReport = !_controlsReported;
+                    _controlsReported = true;
+                    controlsChanged = master != _hasControls;
+                    mirrorChanged = mirroring != _mirroring;
+                    _hasControls = master;
+                    _mirroring = mirroring;
+                    mirrorEnabled = _cfg.FlightMirrorInject;
+                }
+                if (controlsChanged || firstReport)
+                {
+                    if (master == true)
+                        Log?.Invoke("You have the controls." + (mirrorEnabled ? " Flight mirror inactive." : ""));
+                    else if (master == false)
+                        Log?.Invoke("A crew member has the controls." + (mirrorEnabled ? " Your stick, pedals and collective follow theirs." : ""));
+                    else
+                        Log?.Invoke("DCS does not report who has the controls (single player, or the server restricts ownship export): " +
+                                    "the flight mirror only runs outside the first seat.");
+                }
+                if (mirrorChanged && !controlsChanged)
+                    Log?.Invoke(mirroring ? "Flight mirror active." : "Flight mirror inactive.");
                 break;
             }
 
