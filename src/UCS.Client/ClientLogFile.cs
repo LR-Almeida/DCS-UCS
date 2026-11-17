@@ -11,7 +11,9 @@ public sealed class ClientLogFile : IDisposable
     private readonly object _lock = new();
     private StreamWriter? _writer;
 
-    public string Directory { get; } = ModLocator.UcsLogDir();
+    /// <summary>Log folder; the UCS_LOG_DIR environment variable overrides it (tests, portable setups).</summary>
+    public string Directory { get; } =
+        Environment.GetEnvironmentVariable("UCS_LOG_DIR") is { Length: > 0 } custom ? custom : ModLocator.UcsLogDir();
     public string? FilePath { get; private set; }
 
     public ClientLogFile()

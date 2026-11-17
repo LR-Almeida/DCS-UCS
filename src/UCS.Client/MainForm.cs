@@ -220,7 +220,11 @@ public sealed class MainForm : Form
             try
             {
                 lastWidth = avail;
-                var valueWidth = Math.Max(140, avail - 190);   // minus the label column and group box padding
+                // value column = width minus the real label column and the group box borders/padding
+                var labelColumn = Descendants(root).OfType<TableLayoutPanel>().Where(t => t != root)
+                    .SelectMany(t => t.Controls.Cast<Control>().Where(c => t.GetColumn(c) == 0))
+                    .Select(c => c.PreferredSize.Width + c.Margin.Horizontal).DefaultIfEmpty(150).Max();
+                var valueWidth = Math.Max(140, avail - labelColumn - 44);
                 foreach (var c in Descendants(root))
                 {
                     var inValueColumn = c.Parent is TableLayoutPanel t && t != root && t.GetColumn(c) == 1 || c.Parent is FlowLayoutPanel;
@@ -244,7 +248,7 @@ public sealed class MainForm : Form
                                 cb.Size = new Size(valueWidth, wrapped.Height + 6);
                             }
                             break;
-                        case TextBox tb:
+                        case TextBox tb when tb.Parent is not FlowLayoutPanel:   // in a row: sized with the row
                             tb.Tag ??= tb.Width;                         // designed width
                             tb.Width = Math.Min((int)tb.Tag, valueWidth - 8);
                             break;
@@ -253,12 +257,38 @@ public sealed class MainForm : Form
                             l.MaximumSize = new Size(valueWidth, 0);
                             break;
                         case FlowLayoutPanel f:
-                            f.WrapContents = f.FlowDirection == FlowDirection.LeftToRight || f.WrapContents;
+                            if (f.FlowDirection == FlowDirection.LeftToRight)
+                            {
+                                // a text box in the row shrinks first (e.g. pilot name + "Detect from DCS")
+                                int Needed() => f.Controls.Cast<Control>().Sum(x => (x is TextBox ? x.Width : x.PreferredSize.Width) + x.Margin.Horizontal) + f.Padding.Horizontal;
+                                foreach (var tb in f.Controls.OfType<TextBox>())
+                                {
+                                    tb.Tag ??= tb.Width;
+                                    tb.Width = (int)tb.Tag;
+                                    var over = Needed() - valueWidth;
+                                    if (over > 0) tb.Width = Math.Max(80, tb.Width - over);
+                                }
+                                // wrap only when the row really does not fit (a wrapping panel reserves extra height)
+                                f.WrapContents = Needed() > valueWidth;
+                            }
                             f.MaximumSize = new Size(valueWidth, 0);
+                            f.AutoSizeMode = AutoSizeMode.GrowAndShrink;   // default GrowOnly never gives height back
+                            break;
+                        case TableLayoutPanel tl:
+                            tl.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+                            break;
+                        case GroupBox gb:
+                            gb.AutoSizeMode = AutoSizeMode.GrowAndShrink;
                             break;
                     }
                 }
+                // the group boxes take the whole width: same margin on the right as on the left
+                root.MinimumSize = new Size(avail, 0);
                 root.MaximumSize = new Size(avail, 0);
+                // re-measure the auto-sized panels with the new widths (otherwise an old, taller height stays)
+                foreach (var flow in Descendants(root).OfType<FlowLayoutPanel>()) flow.PerformLayout();
+                foreach (var grid in Descendants(root).OfType<TableLayoutPanel>()) grid.PerformLayout();
+                root.PerformLayout();
                 scroll.AutoScrollMinSize = new Size(0, root.PreferredSize.Height + 16);
             }
             finally { fitting = false; }
