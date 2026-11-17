@@ -9,7 +9,7 @@ namespace UCS.Common;
 /// </summary>
 public static class Protocol
 {
-    public const string Version = "0.1.3-alpha";
+    public const string Version = "0.1.4-alpha";
     public const int DefaultServerPort = 5055;
     public const int ExportSendPort = 5051;   // Export.lua -> Client
     public const int ExportListenPort = 5052; // Client -> Export.lua

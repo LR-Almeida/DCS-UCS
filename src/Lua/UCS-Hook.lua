@@ -10,7 +10,7 @@
 -- =============================================================================
 
 local UCSHook = {
-    version      = "0.1.3-alpha",
+    version      = "0.1.4-alpha",
     clientHost   = "127.0.0.1",
     clientPort   = 5053,
     prefix       = "UCS_AUTOCONNECT:",
@@ -125,9 +125,14 @@ end
 
 local function getPlayerUnitId()
     -- Single player / host: DCS.getPlayerUnit() if available
+    -- In a multicrew seat other than the first one DCS returns "<unitId>_<seat>" (e.g. "1005035_2"),
+    -- which DCS.getUnitProperty does not resolve: strip the seat suffix (verified in game, OH-6A seat 2).
     local unitId = safe(function() return DCS.getPlayerUnit() end)
-    if unitId ~= nil and tostring(unitId) ~= "" and tostring(unitId) ~= "0" then
-        return tostring(unitId)
+    if unitId ~= nil then
+        unitId = string.gsub(tostring(unitId), "_%d+$", "")
+        if unitId ~= "" and unitId ~= "0" then
+            return unitId
+        end
     end
     -- Multiplayer: slot of my player ("123" or "123_2" for multicrew seats)
     local myId = safe(function() return net.get_my_player_id() end)
@@ -192,6 +197,9 @@ local function buildState()
         end
         state.group = group and tostring(group) or ""
         state.unit  = unit and tostring(unit) or ""
+        -- Never leave a crew member unpaired because a name lookup failed: every seat of the same
+        -- aircraft shares the unit id, so it identifies the cockpit as well as the name does.
+        if state.unit == "" then state.unit = "#" .. tostring(unitId) end
         state.aircraft = acft and tostring(acft) or ""
         state.in_aircraft = state.unit ~= ""
         state.seat = getSeat()

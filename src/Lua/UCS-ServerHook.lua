@@ -12,7 +12,7 @@
 -- =============================================================================
 
 local UCSServer = {
-    version     = "0.1.3-alpha",
+    version     = "0.1.4-alpha",
     defaultPort = 5055,
     prefix      = "UCS_AUTOCONNECT:",
     sendDelay   = 5.0,   -- seconds after connect (player must finish loading)

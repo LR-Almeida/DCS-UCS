@@ -60,6 +60,17 @@ copilot on the UCS server through the LAN address; logs in `test-logs\2026-11-15
 - [x] DCS lists the second seat as slot `<unit>_2` (role "Instructor"); it cannot be taken without a pilot in seat 1
 - Seen: on activation the client logs "Profile loaded" twice and sends STANDBY + profile again (harmless flap)
 
+First two-player test, 2026-11-16 (OH-6A, DCS server on the internet, UCS-Server through the router;
+logs in `test-logs\2026-11-16-Quik`):
+
+- [x] UCS-Server reachable from the internet (UDP 5055 forwarded); remote client connected
+- [x] `master` flag follows the C-key handover on both PCs; the mirror switches on/off by itself
+- [x] Hook reports the seat ("Multicrew seat: 2" / "1")
+- [x] Native flicker measured without UCS injecting: OH-6A cyclic args 214/215 bounce in seat 2
+- [ ] FAILED: the crew member in seat 2 was never paired (no "Joined the cockpit", switches not synced).
+      Cause: DCS.getPlayerUnit() returns "<unit>_2" in seat 2, the unit name lookup failed and the session
+      key was empty. Fixed in 0.1.4 (strip suffix + unit id fallback) -> repeat the whole two-player list.
+
 Still needs two players:
 
 - [ ] Profile regenerated automatically ("N flight-control animations" in the log; OH-6A 7, UH-60L 4)

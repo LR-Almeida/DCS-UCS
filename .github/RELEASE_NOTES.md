@@ -15,21 +15,21 @@
 Windows 10/11 x64. No .NET install needed (self-contained). The executables are not code-signed yet, so
 Windows SmartScreen may warn on first run.
 
-## What's new in 0.1.3-alpha
+## What's new in 0.1.4-alpha
 
-- **Automatic flight mirror:** while DCS says your seat does **not** have the controls, your stick, pedals
-  and collective follow the crew member flying. It stops on the same frame you take the controls (key C,
-  *Request Aircraft Control*) and resumes when you hand them back. On by default (option in the General
-  tab); the client shows who has the controls. Uses the DCS multicrew flag `LoGetFMData().master`
-  (verified on the OH-6A); without it, only outside the first seat.
-- **Privacy and network options in the installer:** the privacy policy is shown during installation, and
-  the update check and the public IP lookup can be turned off there (`PRIVACY.md`).
-- The DCS server hook no longer looks up the public IP in single player; `DetectPublicIp=false` option.
-- Same product name / version metadata in every file; code signing prepared (not active yet).
-- Diagnostic CSV records who has the controls (`master`, `seat`).
+- **Fix: crew members in the second seat were never paired.** In a multicrew seat other than the first
+  one, DCS reports the slot as `<unit>_2`; the hook could not find the unit, so that client never joined
+  the cockpit session (no switch sync, no flight mirror). Found in the first two-player OH-6A test.
+  The hook now strips the seat suffix and, if a unit name still cannot be read, uses the unit id
+  (shared by every seat of the aircraft).
 
-Update from 0.1.1/0.1.2 with the in-app updater. **Restart DCS** after updating (the DCS scripts changed).
-Flight controls need UCS-Server 0.1.2-alpha or newer.
+**Restart DCS after updating** (the fix is in the DCS hook, loaded when DCS starts). Both crew members
+need 0.1.4.
+
+### Since 0.1.2
+- Automatic flight mirror: while your seat does not have the controls, your stick, pedals and collective
+  follow the crew member flying; it stops on the frame you take the controls (key C).
+- Privacy policy and network options in the installer.
 
 ## Quick test
 
