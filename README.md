@@ -67,16 +67,17 @@ See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the wire protocol.
 3. Start **UCS Client**, enter the UCS server address (or let Auto-Connect do it) and your pilot name.
 4. Start DCS, join the same server and take the **same unit** as your crew mate (or units of the same group — see `SessionMatch`).
 
-The status panel shows:
+The **Status** box of the General tab shows:
 
-- **DCS** — `Standby` or `Ativo: UH-60L`
-- **Sessão** — `Server | Group | Unit` (or manual room)
-- **Conexão** — `Conectado` / `Desconectado`
-- **Tripulação** — the other crew members in your cockpit
+- **DCS** — `Standby` or `Active: UH-60L`
+- **Session** — `Server | Group | Unit` from DCS (or the manual room); group and unit names come from the mission
+- **Connection** — `Connected` / `Disconnected`
+- **Crew** — the other crew members in your cockpit
+- **Compatibility** — `OK`, or why a crew member cannot be synced (different mod version or profile)
 
 **Manual install (portable zip):** copy the Lua files as above and add the `Export.lua` line yourself.
 
-**Manual room override:** fill *Override Manual de Sala* with any shared word (e.g. `rescue-42`) on both
+**Manual room override:** fill *Manual room override* with any shared word (e.g. `rescue-42`) on both
 clients to bypass automatic pairing (useful in single player tests or mods that put each crew member in a
 different unit).
 
@@ -135,7 +136,7 @@ On the machine that hosts the **DCS server**:
    (falls back to the local IP) on port 5055.
 3. Restart the DCS server. Every player that connects receives a silent private chat message
    `UCS_AUTOCONNECT:<address>`; their `UCS-Hook.lua` forwards it to `UCS-Client.exe`, which disconnects from any
-   previous session and connects automatically (if *Aceitar Auto-Connect do Servidor DCS* is checked).
+   previous session and connects automatically (if *Accept Auto-Connect from the DCS server* is checked).
 
 > Only messages sent by the DCS server itself are accepted, so other players cannot redirect your client.
 > Hiding the message from the chat window depends on the DCS build; on builds that do not allow hooks to
@@ -174,7 +175,7 @@ argument → device/command mapping). The server only relays commands between cr
 **and** fingerprint match. If they differ, nothing is synced and the client shows, for example:
 
 ```
-Compatibilidade: ERRO: Copilot usa o mod versão 2.1.4 e você 2.1.5. Atualizem para a mesma versão.
+Compatibility: ERROR: Copilot has mod version 2.1.4 and you have 2.1.5. Both must install the same version.
 ```
 
 Mods that do not declare a version are compared by fingerprint only.
@@ -297,11 +298,11 @@ DCS-UCS/
 
 | Symptom | Check |
 |---|---|
-| DCS stays `Standby (DCS não detectado)` | `Export.lua` line present? Look for `UCS` in `Saved Games\DCS\Logs\dcs.log` |
-| `Sem perfil para 'X'` | Is the mod in `Saved Games\DCS\Mods\aircraft`? Check with `UCS-ProfileGen.exe --list` |
-| `Conectando...` forever | Server running? UDP 5055 open in firewall/router? |
+| DCS stays `Standby (DCS not detected / menu)` | `Export.lua` line present? Look for `UCS` in `Saved Games\DCS\Logs\dcs.log` |
+| `No profile for 'X'` | Is the mod in `Saved Games\DCS\Mods\aircraft`? Check with `UCS-ProfileGen.exe --list` |
+| `Connecting...` forever | Server running? UDP 5055 open in firewall/router? |
 | Crew not paired | Same DCS server, same unit (or `SessionMatch: Group`, or the same manual room) |
-| `ERRO DE COMPATIBILIDADE` | Crew must use the same mod version; if equal, delete the profile in `%APPDATA%\DCS-UCS\profiles` on both PCs |
+| `COMPATIBILITY ERROR` | Crew must use the same mod version; if equal, delete the profile in `%APPDATA%\DCS-UCS\profiles` on both PCs |
 | Switch moves but systems don't react | Open an issue (mod, version, argument id); some mods need generator fixes |
 | Server blocks `LoGetSelfData` (export restrictions) | UCS uses the aircraft type reported by the GameGUI hook instead |
 

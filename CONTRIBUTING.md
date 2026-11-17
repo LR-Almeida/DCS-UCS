@@ -40,7 +40,7 @@ honoured without discussion. You can also tell us about an official way to read 
 Please include:
 
 1. UCS version (shown in the client window title) and DCS version.
-2. Aircraft and mod version (shown in the client *Perfil* line).
+2. Aircraft and mod version (shown in the client *Profile* line).
 3. The `UCS` / `[DCS-UCS]` lines from `Saved Games\DCS\Logs\dcs.log`.
 4. The client log (copy from the client window) and, if relevant, the `UCS-Server.exe` console output.
 5. Which controls fail and how (not moving, moving the wrong way, bouncing...).
