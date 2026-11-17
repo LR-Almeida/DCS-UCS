@@ -537,6 +537,11 @@ public sealed class SyncEngine : IDisposable
         var list = profile.Flight ?? new List<FlightArg>();
         static string F(double d) => d.ToString("0.####", CultureInfo.InvariantCulture);
         _bridge.SendToExport("FLIGHT|" + string.Join(";", list.Select(f => $"{f.Arg}:{f.Axis}:{F(f.Min)}:{F(f.Max)}")));
+        // TRIM|<release>|<releaseEnd>|<set>|<reset>  (empty fields = not available)
+        var t = profile.Trim;
+        _bridge.SendToExport(t is { CanHandOver: true }
+            ? $"TRIM|{t.Release}|{t.ReleaseEnd}|{t.Set}|{t.Reset}"
+            : "TRIM||||");
         SendFlightMode();
     }
 

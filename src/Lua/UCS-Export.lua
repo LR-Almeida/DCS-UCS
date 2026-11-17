@@ -30,6 +30,7 @@
 --            inject 1 = automatic: only while this seat does NOT have the controls
 --            inject 2 = forced (tests only, also with the controls)
 --      FSET|<arg>=<val>;...                      flight args of whoever is flying
+--      TRIM|<release>|<releaseEnd>|<set>|<reset> the mod's trim commands (hand-over)
 --    Export -> Client
 --      FLT|<arg>=<val>;...                       local flight args (~30 Hz, on change)
 --      DIAG|<text>                               diagnostic messages for the client log
@@ -44,7 +45,7 @@
 -- =============================================================================
 
 local UCS = {
-    version       = "0.1.4-alpha",
+    version       = "0.1.5-alpha",
     host          = "127.0.0.1",
     sendPort      = 5051,
     listenPort    = 5052,
@@ -76,6 +77,8 @@ UCS.hookSeat     = nil       -- seat reported by the GameGUI hook (1-based), fal
 UCS.master       = nil       -- true/false: this seat controls the flight model (nil = unknown)
 UCS.seat         = nil       -- LoGetPlayerSeat() (0-based, nil = unknown)
 UCS.mirroring    = false
+UCS.trim         = nil       -- { release=, releaseEnd=, set=, reset= } (command ids) or nil
+UCS.handoff      = nil       -- trim hand-over in progress { stage=, due= }
 UCS.nextCtrlSend = 0
 UCS.fdiag        = false
 UCS.fcmds        = {}        -- axis -> { cmd=, sign= }
@@ -335,6 +338,13 @@ local function handleMessage(msg)
         UCS.finject = inject
         if diag and not UCS.diag then diagOpen() elseif not diag and UCS.diag then diagClose() end
         UCS.fdiag = diag
+    elseif kind == "TRIM" then
+        local r, re, st, rs = tonumber(parts[2] or ""), tonumber(parts[3] or ""), tonumber(parts[4] or ""), tonumber(parts[5] or "")
+        if rs and ((r and re) or st) then
+            UCS.trim = { release = r, releaseEnd = re, set = st, reset = rs }
+        else
+            UCS.trim = nil
+        end
     elseif kind == "FSET" then
         local entries = split(parts[2] or "", ";")
         for i = 1, #entries do
@@ -436,6 +446,64 @@ local function readControl()
     return master, seat
 end
 
+-- Value of a cockpit parameter (nil when the mod does not have it)
+local function cockpitParam(name)
+    if type(list_cockpit_params) ~= "function" then return nil end
+    local ok, list = pcall(list_cockpit_params)
+    if not ok or type(list) ~= "string" then return nil end
+    return tonumber(string.match(list, "%f[%w_]" .. name .. ":%s*(%-?[%d%.]+)"))
+end
+
+-- -----------------------------------------------------------------------------
+-- Trim hand-over (verified on the OH-6A, 2026-11-17)
+--   losing the controls : trim reset   -> the mirrored stick shows exactly the pilot's
+--   taking the controls : trim release (+ release end, or trim set) while the input still holds the
+--                         pilot's stick, then input back to centre -> this seat's trim is the position
+--                         the aircraft was being flown with, so a spring joystick at centre continues
+--                         seamlessly. Skipped for force-feedback / springless sticks (TRIMMING_METHOD 1).
+-- -----------------------------------------------------------------------------
+local function trimSupported()
+    if not UCS.trim then return false end
+    local method = cockpitParam("TRIMMING_METHOD")
+    return method == nil or method == 0
+end
+
+local function startHandoff(t)
+    if not trimSupported() then return end
+    local p, r = UCS.cal["pitch"], UCS.cal["roll"]
+    if not (p and p.ok and r and r.ok) then
+        send("DIAG|Trim hand-over skipped: the stick mirror was not calibrated yet")
+        return
+    end
+    UCS.handoff = { stage = 1, due = t }
+end
+
+local function runHandoff(t)
+    local h = UCS.handoff
+    if not h or t < h.due then return end
+    local tr = UCS.trim
+    if h.stage == 1 then
+        if tr.release and tr.releaseEnd then pcall(LoSetCommand, tr.release, 1) else pcall(LoSetCommand, tr.set, 1) end
+        h.stage, h.due = 2, t + 0.15
+    elseif h.stage == 2 then
+        if tr.release and tr.releaseEnd then pcall(LoSetCommand, tr.releaseEnd, 1) end
+        h.stage, h.due = 3, t + 0.15
+    else
+        -- input back to centre on the trimmed axes (the trim now holds the position)
+        local axes = { "pitch", "roll" }
+        if cockpitParam("PEDAL_TRIM") == 1 then table.insert(axes, "yaw") end
+        for _, axis in ipairs(axes) do
+            local cands, cal = UCS.fcmds[axis], UCS.cal[axis]
+            local c = cands and cal and cal.ok and cands[cal.idx]
+            if c then pcall(LoSetCommand, c.cmd, 0) end
+        end
+        UCS.handoff = nil
+        log("Trim handed over (" .. table.concat(axes, ", ") .. ")")
+        send("DIAG|Trim handed over: your trim now holds the stick position the crew member was flying with (" ..
+            table.concat(axes, ", ") .. ")")
+    end
+end
+
 -- The mirror runs only in a seat that does not fly the aircraft.
 local function mirrorAllowed()
     if not UCS.finject then return false end
@@ -447,6 +515,7 @@ local function mirrorAllowed()
 end
 
 local function updateControl(t)
+    runHandoff(t)
     -- every frame: the mirror must stop on the very frame this seat takes the controls
     local master, seat = readControl()
     local changed = master ~= UCS.master or seat ~= UCS.seat
@@ -454,6 +523,16 @@ local function updateControl(t)
     local mirroring = mirrorAllowed()
     if mirroring ~= UCS.mirroring then
         changed = true
+        -- trim hand-over, only on a real change of controls reported by DCS
+        if UCS.master ~= nil and UCS.finject then
+            if mirroring and UCS.trim and trimSupported() then
+                pcall(LoSetCommand, UCS.trim.reset, 1)
+                UCS.handoff = nil
+                send("DIAG|Trim reset: you do not have the controls, your stick shows the crew member's")
+            elseif not mirroring and UCS.master == true then
+                startHandoff(t)
+            end
+        end
         UCS.mirroring = mirroring
         -- start each mirror period clean (pauses, calibration of axes that never followed)
         UCS.injected, UCS.injectOff = {}, {}
@@ -470,13 +549,18 @@ end
 local function sendFlight(cockpit, t)
     if not UCS.fsend or UCS.mirroring or #UCS.flight == 0 or t < UCS.nextFlt then return end
     UCS.nextFlt = t + UCS.fltInterval
+    -- Changes at 30 Hz, plus the full state every 0.4 s: a crew member who joins or loses the
+    -- controls gets every axis at once instead of waiting for the pilot to move it (field test
+    -- 2026-11-17: axes without a value flickered in the copilot seat).
+    local full = t >= (UCS.nextFullFlt or 0)
+    if full then UCS.nextFullFlt = t + 0.4 end
     local out = {}
     for i = 1, #UCS.flight do
         local f = UCS.flight[i]
         local v = readArg(cockpit, f.arg)
         if v then
             local last = UCS.fsent[f.arg]
-            if last == nil or math.abs(v - last) > 0.002 then
+            if full or last == nil or math.abs(v - last) > 0.002 then
                 UCS.fsent[f.arg] = v
                 table.insert(out, f.arg .. "=" .. string.format("%.4f", v))
             end
@@ -489,12 +573,24 @@ end
 --
 -- Each axis has a list of candidate commands (FMODE "pitch=2001:1,2001:-1"): mods differ in the input
 -- they read and in its direction (OH-6A: pitch inverted, collective on the thrust axis 2004 inverted).
--- Calibration: inject with a candidate; if after 0.6 s the animation does not match the received
--- position (needs a clear stick deflection), try the next one. The first that matches is kept.
+-- Calibration (robust to a moving stick): inject with a candidate and wait until the received
+-- position has been steady (+-0.05) and clearly deflected (>0.15) for 0.5 s, then compare:
+--   animation = received        -> candidate kept
+--   animation = -received       -> jump to the same command with the opposite sign
+--   anything else               -> next candidate
+-- When no candidate works, start over 10 s later (never disabled for good: the pilot may simply
+-- have been moving the stick, field test 2026-11-17).
 local function calibrate(f, axis, cands, cal, la, target, t)
-    if math.abs(target) < 0.15 then return end         -- centred stick: cannot tell the direction yet
-    cal.since = cal.since or t
-    if t - cal.since < 0.6 then return end
+    if cal.retryAt then
+        if t < cal.retryAt then return end
+        cal.retryAt, cal.idx, cal.since = nil, 1, nil
+    end
+    if math.abs(target) < 0.15 then cal.since = nil; return end
+    if not cal.since or math.abs(target - (cal.ref or target)) > 0.05 then
+        cal.since, cal.ref = t, target
+        return
+    end
+    if t - cal.since < 0.5 then return end
     local c = cands[cal.idx]
     if math.abs(la - target) < 0.12 then
         cal.ok = true
@@ -503,18 +599,23 @@ local function calibrate(f, axis, cands, cal, la, target, t)
             " (arg " .. f.arg .. ")")
         return
     end
-    cal.idx = cal.idx + 1
     cal.since = nil
+    if math.abs(la + target) < 0.12 then
+        for j = 1, #cands do
+            if cands[j].cmd == c.cmd and cands[j].sign == -c.sign then cal.idx = j; return end
+        end
+    end
+    cal.idx = cal.idx + 1
     if cal.idx > #cands then
-        UCS.axisOff[axis] = true
-        send("DIAG|Flight input mirror: " .. axis .. " DISABLED - no candidate command moves arg " .. f.arg ..
-            string.format(" (local %.2f vs received %.2f). Set FlightAxisCommands in client_config.json.", la, target))
+        cal.retryAt = t + 10
+        send("DIAG|Flight input mirror: " .. axis .. " - no candidate command moves arg " .. f.arg ..
+            string.format(" yet (local %.2f vs received %.2f); retrying in 10 s.", la, target))
     end
 end
 
 local function injectFlight(cockpit, t)
     if not UCS.mirroring or #UCS.flight == 0 then return end
-    if t - UCS.fremoteAt > 0.5 then return end          -- stream stopped: leave inputs alone
+    if t - UCS.fremoteAt > 1.5 then return end          -- stream stopped (full state every 0.4 s): leave inputs alone
     for i = 1, #UCS.flight do
         local f = UCS.flight[i]
         local axis = f.axis
@@ -530,9 +631,9 @@ local function injectFlight(cockpit, t)
             if la and UCS.injected[axis] then
                 if not cal.ok then
                     calibrate(f, axis, cands, cal, la, target, t)
-                elseif math.abs(la - target) > 0.25 then
-                    -- Safety (per axis): the animation disagrees for more than 1 s -> someone moves the
-                    -- local control: pause that axis for 3 s (3 pauses in a row: disable it).
+                elseif UCS.master == nil and math.abs(la - target) > 0.25 then
+                    -- Fallback mode only (DCS does not report who has the controls): the local
+                    -- control disagrees for more than 1 s -> pause that axis for 3 s.
                     UCS.injectOff[axis] = UCS.injectOff[axis] or t
                     if t - UCS.injectOff[axis] > 1.0 then
                         paused = true
@@ -553,8 +654,8 @@ local function injectFlight(cockpit, t)
                     UCS.axisPauses[axis] = 0
                 end
             end
-            if not paused and not UCS.axisOff[axis] then
-                local c = cands[cal.idx]
+            local c = cands[cal.idx]
+            if c and not paused and not UCS.axisOff[axis] then   -- no candidate while waiting to retry
                 local cmdValue = target * c.sign
                 pcall(LoSetCommand, c.cmd, cmdValue)
                 UCS.injected[axis] = cmdValue

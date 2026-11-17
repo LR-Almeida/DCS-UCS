@@ -109,6 +109,16 @@ public static class ProfileBuilder
             };
         }
 
+        // Trim commands (EFM command ids): hand the trim over with the controls.
+        try
+        {
+            profile.Trim = ReadTrimCommands(scriptsDir);
+        }
+        catch (Exception ex)
+        {
+            result.Warnings.Add("Trim command scan failed: " + ex.Message);
+        }
+
         // Flight-control animations (stick, pedals, collective): mirrored on their own channel.
         try
         {
@@ -123,6 +133,30 @@ public static class ProfileBuilder
             profile.Flight = new();
         }
         return result;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex TrimRegex = new(
+        @"^\s*(trimReleaseRelease|trimRelease|trimSet|trimReset)\s*=\s*(\d+)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
+
+    /// <summary>Reads trimRelease / trimReleaseRelease / trimSet / trimReset from command_defs.lua (numbers only).</summary>
+    public static TrimCommands? ReadTrimCommands(string scriptsDir)
+    {
+        var path = Path.Combine(scriptsDir, "command_defs.lua");
+        if (!File.Exists(path)) return null;
+        var t = new TrimCommands();
+        foreach (System.Text.RegularExpressions.Match m in TrimRegex.Matches(File.ReadAllText(path)))
+        {
+            var id = int.Parse(m.Groups[2].Value);
+            switch (m.Groups[1].Value.ToLowerInvariant())
+            {
+                case "trimrelease": t.Release ??= id; break;
+                case "trimreleaserelease": t.ReleaseEnd ??= id; break;
+                case "trimset": t.Set ??= id; break;
+                case "trimreset": t.Reset ??= id; break;
+            }
+        }
+        return t.Release == null && t.ReleaseEnd == null && t.Set == null && t.Reset == null ? null : t;
     }
 
     public static string FileNameFor(string aircraft)

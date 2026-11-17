@@ -22,9 +22,12 @@ public sealed class AircraftProfile
     /// animation arguments (<see cref="Flight"/>). Older generated profiles are regenerated.
     /// </summary>
     public int Schema { get; set; } = 1;
-    public const int CurrentSchema = 2;
+    /// <summary>3 = also lists the trim commands (<see cref="Trim"/>).</summary>
+    public const int CurrentSchema = 3;
     /// <summary>Flight-control animation args (stick, pedals, collective...), mirrored from whoever flies.</summary>
     public List<FlightArg>? Flight { get; set; }
+    /// <summary>The mod's cyclic trim commands (null when the mod declares none).</summary>
+    public TrimCommands? Trim { get; set; }
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -73,6 +76,24 @@ public sealed class ProfileArg
     public string Description { get; set; } = "";
     /// <summary>button, toggle, multiposition, axis, unknown (informative only).</summary>
     public string? Type { get; set; }
+}
+
+/// <summary>
+/// Trim commands of a mod (EFM command ids from command_defs.lua). Used to hand the trim over with
+/// the controls: the seat that loses the controls resets its trim, the seat that takes them captures
+/// the mirrored stick position as its trim (verified on the OH-6A).
+/// </summary>
+public sealed class TrimCommands
+{
+    /// <summary>"Trim release" pressed (force trim: trim follows the stick while held).</summary>
+    public int? Release { get; set; }
+    /// <summary>"Trim release" released (trim stored at the current stick position).</summary>
+    public int? ReleaseEnd { get; set; }
+    /// <summary>Single "trim set" command (alternative to Release/ReleaseEnd).</summary>
+    public int? Set { get; set; }
+    public int? Reset { get; set; }
+
+    public bool CanHandOver => Reset != null && ((Release != null && ReleaseEnd != null) || Set != null);
 }
 
 /// <summary>Axis names used in <see cref="FlightArg.Axis"/>.</summary>

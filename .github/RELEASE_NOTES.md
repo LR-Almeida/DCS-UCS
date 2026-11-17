@@ -15,21 +15,27 @@
 Windows 10/11 x64. No .NET install needed (self-contained). The executables are not code-signed yet, so
 Windows SmartScreen may warn on first run.
 
-## What's new in 0.1.4-alpha
+## What's new in 0.1.5-alpha
 
-- **Fix: crew members in the second seat were never paired.** In a multicrew seat other than the first
-  one, DCS reports the slot as `<unit>_2`; the hook could not find the unit, so that client never joined
-  the cockpit session (no switch sync, no flight mirror). Found in the first two-player OH-6A test.
-  The hook now strips the seat suffix and, if a unit name still cannot be read, uses the unit id
-  (shared by every seat of the aircraft).
+- **Trim hand-over:** the trim now goes with the controls. When you lose the controls your trim is reset,
+  so your stick shows exactly the pilot's; when you take them, your trim is set to the position the
+  aircraft was being flown with, so a spring joystick at centre continues without a jump (pedals too
+  when the mod's pedal trim is on). The trim commands are found automatically in each mod
+  (OH-6A, AH-6J: trim release/reset; UH-60L: trim set/reset, still to be verified). Not used with
+  force-feedback / springless sticks (mod option).
+- **No more stick flicker in the copilot seat:** the pilot re-sends the full stick / pedals / collective
+  position every 0.4 s, so the other seat always has a value to show, and the mirror no longer pauses
+  while DCS reports who has the controls (the pause let the native multicrew flicker through).
+- **Robust axis calibration:** works while the pilot is moving the stick, switches straight to the
+  inverted command when the animation moves the wrong way, and retries instead of giving up.
+- Collective keeps the last mirrored position after a handover until you move your own.
+- Profiles are regenerated once (they now list the trim commands).
 
-**Restart DCS after updating** (the fix is in the DCS hook, loaded when DCS starts). Both crew members
-need 0.1.4.
+**Restart DCS after updating.** Both crew members need 0.1.5.
 
-### Since 0.1.2
-- Automatic flight mirror: while your seat does not have the controls, your stick, pedals and collective
-  follow the crew member flying; it stops on the frame you take the controls (key C).
-- Privacy policy and network options in the installer.
+### Since 0.1.3
+- Crew members in the second seat are paired (0.1.4).
+- Automatic flight mirror while you do not have the controls (0.1.3).
 
 ## Quick test
 

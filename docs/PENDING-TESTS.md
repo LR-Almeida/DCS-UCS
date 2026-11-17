@@ -71,6 +71,20 @@ logs in `test-logs\2026-11-16-Quik`):
       Cause: DCS.getPlayerUnit() returns "<unit>_2" in seat 2, the unit name lookup failed and the session
       key was empty. Fixed in 0.1.4 (strip suffix + unit id fallback) -> repeat the whole two-player list.
 
+Second two-player test, 2026-11-17 (0.1.4, logs in `test-logs6-11-17-Quik`):
+
+- [x] Crew member in seat 2 paired ("Joined the cockpit"), handovers with C both ways, axes mirrored
+      (pitch within 0.017, one frame behind)
+- [x] Flicker in the copilot seat only while UCS had no value / was paused (1 vs up to 9 flips per 1000
+      frames) -> 0.1.5: full state every 0.4 s, no pause while DCS reports the controls
+- [x] Calibration failed on roll/yaw with the pilot moving the stick -> 0.1.5: robust calibration
+- [x] Collective after handover = the new pilot's physical collective (expected, accepted by the user)
+- [x] Trim not shared (lives in the mod's FM) -> 0.1.5: trim hand-over; reset/release/set verified in single
+      player on the OH-6A (trim captured exactly at the mirrored position, pedals included)
+- [ ] 0.1.5 in two-player flight: trim hand-over feels seamless both ways; no flicker in the copilot seat;
+      UH-60L trim hand-over (trimSet semantics unverified); arg 53 (ARC-54 tuning knob) flicker seen on the
+      copilot PC
+
 Still needs two players:
 
 - [ ] Profile regenerated automatically ("N flight-control animations" in the log; OH-6A 7, UH-60L 4)

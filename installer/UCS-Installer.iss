@@ -7,10 +7,10 @@
 #define AppName "DCS-UCS"
 #define AppFullName "DCS-UCS (Universal Control Sync)"
 #ifndef AppVersion
-  #define AppVersion "0.1.4-alpha"
+  #define AppVersion "0.1.5-alpha"
 #endif
 #define AppPublisher "DCS-UCS contributors"
-; Numeric x.y.z.0 for the Windows version resource ("0.1.4-alpha" -> "0.1.4.0")
+; Numeric x.y.z.0 for the Windows version resource ("0.1.5-alpha" -> "0.1.5.0")
 #define DashPos Pos("-", AppVersion)
 #if DashPos > 0
   #define AppNumVersion Copy(AppVersion, 1, DashPos - 1) + ".0"

@@ -67,6 +67,23 @@ fighting over one argument), so UCS mirrors them differently:
   (local and remote value of each flight arg, injected values, paused axes) and reports, every
   5 s, any cockpit argument that bounces between two values (direction reversals frame to frame).
 
+### Trim hand-over (0.1.5+)
+
+The profile lists the mod's trim commands found in `command_defs.lua` (`trimRelease`,
+`trimReleaseRelease`, `trimSet`, `trimReset`; Client → Export `TRIM|release|releaseEnd|set|reset`).
+On the OH-6A the cockpit stick animation is input + trim, and the trim lives inside the mod's flight
+model (not readable). So the trim is handed over with the controls instead of being copied:
+
+- losing the controls → `trimReset`: the mirrored stick shows exactly the pilot's position;
+- taking the controls → `trimRelease`, `trimReleaseRelease` (or `trimSet`) while the input still holds
+  the mirrored position, then the pitch/roll (and yaw when the mod's `PEDAL_TRIM` is on) inputs go back
+  to centre: the new pilot's trim is the position the aircraft was being flown with, so a spring
+  joystick at centre continues seamlessly. Collective keeps the mirrored value until the physical
+  control moves. Skipped when the mod's `TRIMMING_METHOD` is 1 (force feedback / no springs).
+
+The pilot also re-sends the full flight state every 0.4 s, and the seat without the controls never
+pauses the mirror while DCS reports who has them (pausing only showed the native multicrew flicker).
+
 ## Hook → Client (JSON)
 
 ```json
