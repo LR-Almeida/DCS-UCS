@@ -15,6 +15,13 @@
 Windows 10/11 x64. No .NET install needed (self-contained). The executables are not code-signed yet, so
 Windows SmartScreen may warn on first run.
 
+## What's new in 0.1.8-alpha
+
+- **Application icon** for UCS-Client, UCS-Server, UCS-ProfileGen and the installer (sync arrows around a rotor).
+- **General tab:** group boxes use the whole width (same margin on both sides); rows wrap only when they do not
+  fit; the pilot name field shrinks so "Detect from DCS" stays beside it.
+- No functional change to the sync: crew members on 0.1.7 and 0.1.8 work together.
+
 ## What's new in 0.1.7-alpha
 
 - **UH-60L cargo doors** are now synced as external states (they were excluded together with sling-load
