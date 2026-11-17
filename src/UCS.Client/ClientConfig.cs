@@ -21,6 +21,8 @@ public sealed class ClientConfig
     public bool IncludePreReleases { get; set; } = true;
     /// <summary>Version the user chose to skip in the update pop-up.</summary>
     public string SkippedVersion { get; set; } = "";
+    /// <summary>Saved UCS servers (Favorites tab).</summary>
+    public List<FavoriteServer> Favorites { get; set; } = new();
 
     // ---- Flight controls (0.1.2+, experimental)
     /// <summary>Send this seat's stick / pedals / collective positions to the crew (view only).</summary>
@@ -71,6 +73,8 @@ public sealed class ClientConfig
                     if (cfg.ServerPort is < 1 or > 65535) cfg.ServerPort = Protocol.DefaultServerPort;
                     cfg.ManualRoom ??= "";
                     cfg.PilotName = string.IsNullOrWhiteSpace(cfg.PilotName) ? "Pilot" : cfg.PilotName;
+                    cfg.Favorites ??= new();
+                    cfg.Favorites.RemoveAll(f => f == null || string.IsNullOrWhiteSpace(f.Host));
                     if (string.IsNullOrWhiteSpace(cfg.FlightAxisCommands) || cfg.FlightAxisCommands == OldDefaultFlightAxisCommands)
                         cfg.FlightAxisCommands = DefaultFlightAxisCommands;
                     return cfg.ApplyInstallOptions();

@@ -86,6 +86,11 @@ public sealed class MainForm : Form
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
         _tabs.TabPages.Add(BuildGeneralTab());
+        _tabs.TabPages.Add(new FavoritesTab(
+            () => _cfg.Favorites,
+            () => SaveConfig(showMessage: false),
+            () => UdpHelper.TryParseAddress(_host.Text, (int)_port.Value, out var h, out var p) ? (h, p) : (_host.Text.Trim(), (int)_port.Value),
+            fav => _ = ConnectToFavoriteAsync(fav)));
         _tabs.TabPages.Add(BuildLogTab());
         _tabs.TabPages.Add(BuildUpdateTab());
         _tabs.TabPages.Add(BuildTextTab("Help", HelpText));
@@ -594,6 +599,19 @@ public sealed class MainForm : Form
         LoadConfigToUi(_cfg);
     }
 
+    /// <summary>Favorites tab: put the saved address in the General tab and connect to it.</summary>
+    private async Task ConnectToFavoriteAsync(FavoriteServer fav)
+    {
+        if (_engine.GetStatus().ConnectionRequested) _engine.Disconnect();
+        _host.Text = fav.Host;
+        _port.Value = Math.Clamp(fav.Port, 1, 65535);
+        _tabs.SelectedIndex = 0;
+        AddLog($"Connecting to favorite \"{fav.Name}\" ({fav.Address})...");
+        SaveConfig(showMessage: false);
+        await _engine.ConnectAsync();
+        RefreshStatus();
+    }
+
     private async Task ToggleConnectAsync()
     {
         _connect.Enabled = false;
@@ -768,6 +786,8 @@ QUICK START
    - Or leave "Accept Auto-Connect from the DCS server" checked: if the DCS server runs
      the UCS server hook, you are connected automatically when you join it.
    - "Connection" shows Connected when the server answers.
+   - Favorites tab: save the servers you use ("Add current server" or "Add...") and
+     double-click one to connect.
 
 3. Fly
    - Join the same DCS server and the same aircraft (same unit, or another seat of it).
