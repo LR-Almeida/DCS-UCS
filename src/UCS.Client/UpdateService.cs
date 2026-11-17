@@ -125,7 +125,7 @@ public sealed class UpdateService : IDisposable
         if (path == null) return;
         if (IsDcsRunning())
             Log?.Invoke("DCS is running: restart DCS after the update so it loads the new UCS scripts.");
-        RunInstaller(path);
+        await RunInstallerAsync(path).ConfigureAwait(false);
     }
 
     /// <summary>Asks DCS to close (like clicking X), waits, then installs. Never kills DCS.</summary>
@@ -136,7 +136,7 @@ public sealed class UpdateService : IDisposable
         var procs = DcsProcesses();
         if (procs.Count == 0)
         {
-            RunInstaller(path);
+            await RunInstallerAsync(path).ConfigureAwait(false);
             return;
         }
         // DCS answers the close request with its own in-game confirmation box. It is drawn by DCS
@@ -168,7 +168,7 @@ public sealed class UpdateService : IDisposable
             await UpdateWhenDcsClosesAsync().ConfigureAwait(false);
             return;
         }
-        RunInstaller(path);
+        await RunInstallerAsync(path).ConfigureAwait(false);
     }
 
     /// <summary>Downloads now and installs as soon as DCS exits (immediately if DCS is not running).</summary>
@@ -178,7 +178,7 @@ public sealed class UpdateService : IDisposable
         if (path == null) return;
         if (!IsDcsRunning())
         {
-            RunInstaller(path);
+            await RunInstallerAsync(path).ConfigureAwait(false);
             return;
         }
         _waitCts?.Cancel();
@@ -190,7 +190,7 @@ public sealed class UpdateService : IDisposable
         {
             while (IsDcsRunning()) await Task.Delay(3000, ct).ConfigureAwait(false);
             await Task.Delay(2000, ct).ConfigureAwait(false); // let DCS release its files
-            RunInstaller(path);
+            await RunInstallerAsync(path).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -237,6 +237,7 @@ public sealed class UpdateService : IDisposable
             var dir = Path.Combine(Path.GetTempPath(), "DCS-UCS-update");
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, installer.Name);
+            CleanOldDownloads(dir, path);
             Set(UpdateStage.Downloading, $"Downloading {installer.Name}...", null, 0);
             using (var resp = await http.GetAsync(installer.DownloadUrl, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
             {
@@ -286,27 +287,74 @@ public sealed class UpdateService : IDisposable
         }
     }
 
-    private void RunInstaller(string path)
+    /// <summary>
+    /// Starts the installer and closes the client only once Setup really runs. Inno Setup starts without
+    /// privileges and asks for elevation itself, so Process.Start succeeds even when the user then refuses
+    /// the Windows (UAC) prompt: the client must not exit before knowing (field test 2026-11-17: the client
+    /// closed and nothing was installed). Setup writes its /LOG file as soon as it runs elevated.
+    /// </summary>
+    private async Task RunInstallerAsync(string path)
     {
+        var log = Path.Combine(Path.GetTempPath(), "DCS-UCS-update", "install.log");
+        Process? setup;
         try
         {
-            var log = Path.Combine(Path.GetTempPath(), "DCS-UCS-update", "install.log");
+            try { File.Delete(log); } catch { /* ignore */ }
             Set(UpdateStage.Installing, "Starting the installer (Windows may ask for permission)...");
-            Process.Start(new ProcessStartInfo(path,
+            setup = Process.Start(new ProcessStartInfo(path,
                 $"/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /NOCANCEL /UPDATE=1 /LOG=\"{log}\"")
             {
                 UseShellExecute = true, // lets Windows show the UAC prompt
             });
-            Log?.Invoke("Installer started; UCS-Client will close and reopen after the update.");
-            ExitRequested?.Invoke();
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
             Set(UpdateStage.Available, "Update cancelled (administrator permission was denied).");
+            Log?.Invoke("Update cancelled: administrator permission was denied.");
+            return;
         }
         catch (Exception ex)
         {
             Set(UpdateStage.Error, "Could not start the installer: " + ex.Message);
+            return;
+        }
+
+        // Wait (up to 5 min, the UAC prompt can stay open) until Setup runs or gives up
+        for (var i = 0; i < 600; i++)
+        {
+            if (File.Exists(log))
+            {
+                Log?.Invoke("Installer started; UCS-Client will close and reopen after the update.");
+                ExitRequested?.Invoke();
+                return;
+            }
+            var exited = false;
+            try { exited = setup == null || setup.HasExited; } catch { exited = true; }
+            if (exited)
+            {
+                await Task.Delay(1000).ConfigureAwait(false);   // the log may appear right before exit
+                if (File.Exists(log)) continue;
+                Set(UpdateStage.Available, "Update cancelled (administrator permission was denied or Setup did not start).");
+                Log?.Invoke("Update cancelled: the installer did not start (Windows permission denied?). UCS-Client keeps running.");
+                return;
+            }
+            await Task.Delay(500).ConfigureAwait(false);
+        }
+        Set(UpdateStage.Available, "The installer did not start within 5 minutes; update not installed.");
+    }
+
+    /// <summary>Removes installers of older versions left in the download folder.</summary>
+    private static void CleanOldDownloads(string dir, string keep)
+    {
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(dir, InstallerPrefix + "*.exe"))
+                if (!string.Equals(Path.GetFullPath(f), Path.GetFullPath(keep), StringComparison.OrdinalIgnoreCase))
+                    File.Delete(f);
+        }
+        catch
+        {
+            // best effort
         }
     }
 

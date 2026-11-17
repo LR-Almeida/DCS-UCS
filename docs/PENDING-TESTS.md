@@ -18,7 +18,10 @@ The updater needs a newer release to update **to**, so the first real test happe
 - [ ] **Cancel scheduled update** stops the wait
 - [x] **Skip this version** (0.1.6, 2026-11-17): no pop-up on the next start; *Check now* still shows it (to confirm)
 - [x] **Remind me later** (0.1.6, 2026-11-17): pop-up returned at the next start of the client
-- [ ] UAC denied → "Update cancelled", client keeps running
+- [x] UAC denied (0.1.5 -> 0.1.6, 2026-11-17): FAILED - the client closed and nothing was installed (Inno asks
+      for elevation after it starts). Fixed for the next release: the client waits for Setup's log before
+      closing; denial -> "Update cancelled", client keeps running (tested with fake installers)
+- [ ] Next release: UAC denied -> "Update cancelled", client keeps running
 - [x] Silent update keeps previous installer choices (DCS scripts re-copied to Saved Games, server hook,
       firewall rule not duplicated) and `Export.lua` still has exactly one UCS line
 - [ ] After updating with DCS open: client warns that DCS runs older scripts until restarted
