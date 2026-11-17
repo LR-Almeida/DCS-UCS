@@ -16,8 +16,8 @@ The updater needs a newer release to update **to**, so the first real test happe
 - [ ] Same in the main menu and inside a mission (confirmation box may differ)
 - [x] **Update when DCS closes** (0.1.3 -> 0.1.4, 2026-11-16): waits while DCS runs, installs right after DCS exits
 - [ ] **Cancel scheduled update** stops the wait
-- [ ] **Skip this version**: no pop-up on the next automatic check; *Check now* still shows it
-- [ ] **Remind me later**: pop-up returns on the next automatic check (startup / 6 h)
+- [x] **Skip this version** (0.1.6, 2026-11-17): no pop-up on the next start; *Check now* still shows it (to confirm)
+- [x] **Remind me later** (0.1.6, 2026-11-17): pop-up returned at the next start of the client
 - [ ] UAC denied → "Update cancelled", client keeps running
 - [x] Silent update keeps previous installer choices (DCS scripts re-copied to Saved Games, server hook,
       firewall rule not duplicated) and `Export.lua` still has exactly one UCS line

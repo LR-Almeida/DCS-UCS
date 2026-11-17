@@ -301,6 +301,10 @@ public sealed class MainForm : Form
                 case UpdateChoice.CloseDcsAndUpdate: _ = _updates.CloseDcsAndUpdateAsync(); break;
                 case UpdateChoice.WhenDcsCloses: _ = _updates.UpdateWhenDcsClosesAsync(); break;
                 case UpdateChoice.Skip: SkipCurrentRelease(); break;
+                case UpdateChoice.Later:
+                    AddLog($"Update {_updates.State.Release?.Version} postponed: you will be reminded at the next automatic check " +
+                           "(next start of the client or in 6 hours). The Update tab can install it any time.");
+                    break;
             }
         }
         finally
