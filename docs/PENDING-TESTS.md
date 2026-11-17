@@ -110,7 +110,9 @@ logs in `test-logs6-11-17-estado-externo-automatizado`):
       any switch moved by a try is restored)
 - [x] A change made in this seat is sent to the crew and not undone by the crew's older state
 - [ ] Two players: doors / landing light / searchlight both ways; late joiner gets the external states;
-      UH-60L and AH-6J/MH-6J
+      UH-60L (cargo doors 401/402 from 0.1.7) and AH-6J/MH-6J
+- [ ] Sling load / cargo hook in multicrew (excluded from UCS on purpose): does DCS show the same hooked cargo
+      to both seats, and who can hook / release?
 
 Still needs two players:
 

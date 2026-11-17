@@ -23,8 +23,9 @@ public sealed class AircraftProfile
     /// </summary>
     public int Schema { get; set; } = 1;
     /// <summary>3 = trim commands (<see cref="Trim"/>); 4 = axis commands from the mod's bindings;
-    /// 5 = external states (<see cref="External"/>); 6 = external states with per-arg commands.</summary>
-    public const int CurrentSchema = 6;
+    /// 5 = external states (<see cref="External"/>); 6 = external states with per-arg commands;
+    /// 7 = cargo doors no longer excluded.</summary>
+    public const int CurrentSchema = 7;
     /// <summary>Flight-control animation args (stick, pedals, collective...), mirrored from whoever flies.</summary>
     public List<FlightArg>? Flight { get; set; }
     /// <summary>The mod's cyclic trim commands (null when the mod declares none).</summary>

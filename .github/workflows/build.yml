@@ -34,7 +34,7 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart('v') } else { $v = "0.1.6-alpha" }
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart('v') } else { $v = "0.1.7-alpha" }
           "value=$v" >> $env:GITHUB_OUTPUT
 
       - name: Publish executables

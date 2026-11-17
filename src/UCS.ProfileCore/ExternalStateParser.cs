@@ -30,7 +30,7 @@ public static partial class ExternalStateParser
     private static partial Regex StateCommandRegex();
 
     // Not an on/off state (brightness steps, cycling, movement) or not harmless to replay on the other seat
-    [GeneratedRegex(@"throttle|cutoff|engine|start|fire|weapon|gun|rocket|missile|bomb|jettison|eject|fuel|batt|gener|gov|trim|rotor|brake|cargo|release|drop|arm|master|sling|hoist|winch|flare|chaff|smoke|grenade|roe|burst|increase|decrease|slew|axis|mode|lock|zoom|move|gear|flap|spoiler|speedbrake|hook|wing|probe|refuel|pilot|show|stick|cycle|intensity|dim|bright|(inc|dec)(_|$|[A-Z])|_(inc|dec)|(up|down|left|right)$|_(up|down|left|right)",
+    [GeneratedRegex(@"throttle|cutoff|engine|start|fire|weapon|gun|rocket|missile|bomb|jettison|eject|fuel|batt|gener|gov|trim|rotor|brake|cargo(?!\w*door)|release|drop|arm|master|sling|hoist|winch|flare|chaff|smoke|grenade|roe|burst|increase|decrease|slew|axis|mode|lock|zoom|move|gear|flap|spoiler|speedbrake|hook|wing|probe|refuel|pilot|show|stick|cycle|intensity|dim|bright|(inc|dec)(_|$|[A-Z])|_(inc|dec)|(up|down|left|right)$|_(up|down|left|right)",
         RegexOptions.IgnoreCase)]
     private static partial Regex DangerousCommandRegex();
 
