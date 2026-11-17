@@ -2,6 +2,7 @@ using UCS.Common;
 using UCS.Server;
 
 Console.Title = "UCS-Server - DCS Universal Control Sync";
+using var logFile = ServerLogFile.Install();
 Console.WriteLine("==============================================================");
 Console.WriteLine($"  DCS-UCS Server {Protocol.Version}  -  Universal Control Sync");
 Console.WriteLine("  Free & open-source (MIT). Ctrl+C to stop.");
@@ -21,12 +22,14 @@ for (var i = 0; i < args.Length; i++)
             break;
         case "--help" or "-h" or "/?":
             Console.WriteLine("Usage: UCS-Server.exe [--port 5055] [--config server_config.json]");
+            Console.WriteLine(@"Log: Saved Games\DCS\Logs\UCS\UCS-Server.log (or %APPDATA%\DCS-UCS\logs without DCS).");
             return 0;
     }
 }
 
 configPath ??= AppPaths.ConfigFile("server_config.json");
 var cfg = ServerConfig.LoadOrCreate(configPath);
+Console.WriteLine(logFile?.FilePath is { } logPath ? $"[INFO] Log file: {logPath}" : "[INFO] Log file: not available (console only)");
 if (portOverride is > 0 and < 65536) cfg.Port = portOverride.Value;
 
 using var cts = new CancellationTokenSource();

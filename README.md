@@ -239,6 +239,7 @@ All UCS files are in `Saved Games\DCS\Logs\UCS`:
 | File | Content |
 |---|---|
 | `UCS-Client.log` | Client log of the current session (the previous one is `UCS-Client.old.log`) |
+| `UCS-Server.log` | UCS-Server console output (previous run: `UCS-Server.old.log`). On a PC without DCS: `%APPDATA%\DCS-UCS\logs` |
 | `UCS-diag-<time>.csv` | Flight-control diagnostic recording (only when enabled) |
 
 The DCS scripts also write a few lines tagged `UCS` in `Saved Games\DCS\Logs\dcs.log`.

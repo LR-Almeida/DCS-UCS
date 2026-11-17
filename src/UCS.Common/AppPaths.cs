@@ -19,6 +19,40 @@ public static class AppPaths
         }
     }
 
+    /// <summary>Saved Games folder (honors a relocated folder via the registry).</summary>
+    public static string SavedGamesDir()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders");
+                if (k?.GetValue("{4C5C32FF-BB9D-43b0-B5B4-2D72E54EAAA4}", null, Microsoft.Win32.RegistryValueOptions.DoNotExpandEnvironmentNames) is string raw)
+                {
+                    var p = Environment.ExpandEnvironmentVariables(raw);
+                    if (Directory.Exists(p)) return p;
+                }
+            }
+            catch
+            {
+                // fall back below
+            }
+        }
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Saved Games");
+    }
+
+    /// <summary>DCS write folder (Saved Games\DCS, or DCS.openbeta when only that one exists).</summary>
+    public static string DcsWriteDir()
+    {
+        var sg = SavedGamesDir();
+        var stable = Path.Combine(sg, "DCS");
+        var beta = Path.Combine(sg, "DCS.openbeta");
+        return !Directory.Exists(stable) && Directory.Exists(beta) ? beta : stable;
+    }
+
+    /// <summary>Folder for every UCS log: Saved Games\DCS\Logs\UCS.</summary>
+    public static string UcsLogDir() => Path.Combine(DcsWriteDir(), "Logs", "UCS");
+
     public static bool IsWritable(string dir)
     {
         try
