@@ -132,6 +132,9 @@ if (noAxes) Console.WriteLine($"Axes removed:            {result.AxesRemoved}");
 Console.WriteLine($"Duplicate args ignored:  {result.Duplicates}");
 Console.WriteLine($"Arguments in profile:    {result.Profile.Args.Count}");
 Console.WriteLine($"Profile fingerprint:     {result.Profile.Fingerprint()}");
+var axisCmds = result.Profile.FlightCommands;
+Console.WriteLine("Axis commands (mod):     " + (axisCmds == null ? "none" :
+                  string.Join(", ", axisCmds.Select(kv => $"{kv.Key} {string.Join("/", kv.Value)}"))));
 var trim = result.Profile.Trim;
 Console.WriteLine($"Trim commands:           " + (trim == null ? "none" :
                   $"release {trim.Release?.ToString() ?? "-"} / release-end {trim.ReleaseEnd?.ToString() ?? "-"} / set {trim.Set?.ToString() ?? "-"} / reset {trim.Reset?.ToString() ?? "-"}" +

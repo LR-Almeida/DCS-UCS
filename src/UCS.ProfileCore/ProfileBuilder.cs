@@ -109,6 +109,17 @@ public static class ProfileBuilder
             };
         }
 
+        // Input commands of the flight axes, from the mod's own joystick bindings.
+        try
+        {
+            var axisCommands = AxisCommandParser.Parse(modDir, scriptsDir, aircraft, result.Warnings);
+            profile.FlightCommands = axisCommands.Count > 0 ? axisCommands : null;
+        }
+        catch (Exception ex)
+        {
+            result.Warnings.Add("Axis command scan failed: " + ex.Message);
+        }
+
         // Trim commands (EFM command ids): hand the trim over with the controls.
         try
         {

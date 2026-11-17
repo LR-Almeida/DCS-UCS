@@ -85,6 +85,19 @@ Second two-player test, 2026-11-17 (0.1.4, logs in `test-logs6-11-17-Quik`):
       UH-60L trim hand-over (trimSet semantics unverified); arg 53 (ARC-54 tuning knob) flicker seen on the
       copilot PC
 
+Third two-player test, 2026-11-17 (0.1.5 with Pedro, OH-6A / UH-60L / AH-6J / MH-6J, logs in
+`test-logs6-11-17-Pedro`):
+
+- [x] Trim hand-over in real handovers (OH-6A, AH-6J, MH-6J, both seats): trim captured at the pilot's position
+- [x] Profiles regenerated with trim commands; MH-6J profile generated on first entry (same mod as AH-6J)
+- [ ] FIXED in 0.1.6: spurious trim hand-over when entering another aircraft while not having the controls
+- [ ] FIXED in 0.1.6: calibration and diagnostic columns carried from the OH-6A into the UH-60L (UH-60 mirror wrong)
+- [ ] FIXED in 0.1.6: ~1.5 s roll/yaw wobble after the hand-over (the mod fades the new trim in)
+- [ ] FIXED in 0.1.6: hand-over skipped when an axis near centre was not calibrated yet
+- [ ] FIXED in 0.1.6: throttle not mirrored (OH-6A Keys.throttleAxis verified in game: moves args 4 and 211)
+- [ ] 0.1.6 in flight: UH-60L calibration from scratch (collective 2087 from the mod bindings) and its
+      trim set/reset hand-over; AH-6J arg 111 (Argus ENR button) flicker - button pressed or echo?
+
 Still needs two players:
 
 - [ ] Profile regenerated automatically ("N flight-control animations" in the log; OH-6A 7, UH-60L 4)

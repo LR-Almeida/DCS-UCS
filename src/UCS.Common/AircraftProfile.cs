@@ -22,12 +22,17 @@ public sealed class AircraftProfile
     /// animation arguments (<see cref="Flight"/>). Older generated profiles are regenerated.
     /// </summary>
     public int Schema { get; set; } = 1;
-    /// <summary>3 = also lists the trim commands (<see cref="Trim"/>).</summary>
-    public const int CurrentSchema = 3;
+    /// <summary>3 = also lists the trim commands (<see cref="Trim"/>); 4 = axis commands from the mod's bindings.</summary>
+    public const int CurrentSchema = 4;
     /// <summary>Flight-control animation args (stick, pedals, collective...), mirrored from whoever flies.</summary>
     public List<FlightArg>? Flight { get; set; }
     /// <summary>The mod's cyclic trim commands (null when the mod declares none).</summary>
     public TrimCommands? Trim { get; set; }
+    /// <summary>
+    /// Input command ids the mod binds to each flight axis (pitch, roll, yaw, collective, throttle), from its
+    /// Input/joystick/default.lua. First candidates of the flight mirror calibration.
+    /// </summary>
+    public Dictionary<string, List<int>>? FlightCommands { get; set; }
 
     public static readonly JsonSerializerOptions Json = new()
     {

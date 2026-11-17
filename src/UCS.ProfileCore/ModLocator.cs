@@ -118,6 +118,31 @@ public static partial class ModLocator
         return m.Success ? m.Groups["v"].Value : null;
     }
 
+    /// <summary>Like <see cref="FindFile(string,string)"/> but only paths containing <paramref name="folder"/>
+    /// (e.g. "joystick"); prefers the one that also contains <paramref name="prefer"/> (an aircraft name).</summary>
+    public static string? FindFile(string root, string name, string folder, string? prefer = null)
+    {
+        try
+        {
+            var sep = Path.DirectorySeparatorChar;
+            return Directory.EnumerateFiles(root, name, new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    MatchCasing = MatchCasing.CaseInsensitive,
+                    IgnoreInaccessible = true,
+                    MaxRecursionDepth = 8,
+                })
+                .Where(p => p.Contains(sep + folder + sep, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(p => prefer != null && p.Contains(sep + prefer + sep, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(p => p.Length)
+                .FirstOrDefault();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public static string? FindFile(string root, string name)
     {
         try

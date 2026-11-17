@@ -548,8 +548,23 @@ public sealed class SyncEngine : IDisposable
     private void SendFlightMode()
     {
         ClientConfig cfg;
-        lock (_gate) cfg = _cfg.Clone();
+        Dictionary<string, List<int>>? modAxes;
+        lock (_gate)
+        {
+            cfg = _cfg.Clone();
+            modAxes = _profile?.FlightCommands;
+        }
         var cmds = new List<string>();
+        var perAxis = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        // 1) the commands the mod itself binds to each axis, both directions
+        if (modAxes != null)
+            foreach (var (axis, ids) in modAxes)
+            {
+                var list = perAxis.TryGetValue(axis, out var l) ? l : perAxis[axis] = new List<string>();
+                foreach (var id in ids)
+                    foreach (var sign in new[] { "1", "-1" })
+                        if (!list.Contains($"{id}:{sign}")) list.Add($"{id}:{sign}");
+            }
         // "axis=cmd[:-1],cmd...;axis=..." -> candidates tried in order by the Export (calibration)
         foreach (var item in (cfg.FlightAxisCommands ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
@@ -562,8 +577,13 @@ public sealed class SyncEngine : IDisposable
                 if (!int.TryParse(cs[0], out var cmd)) continue;
                 cands.Add($"{cmd}:{(cs.Length > 1 && cs[1].StartsWith('-') ? "-1" : "1")}");
             }
-            if (cands.Count > 0) cmds.Add($"{kv[0].ToLowerInvariant()}={string.Join(",", cands)}");
+            // 2) then the configured / default candidates
+            var axisName = kv[0].ToLowerInvariant();
+            var merged = perAxis.TryGetValue(axisName, out var known) ? known : perAxis[axisName] = new List<string>();
+            foreach (var c in cands) if (!merged.Contains(c)) merged.Add(c);
         }
+        foreach (var (axis, list) in perAxis)
+            if (list.Count > 0) cmds.Add($"{axis}={string.Join(",", list)}");
         int seat;
         lock (_gate) seat = _seat;
         _bridge.SendToExport($"FMODE|{(cfg.FlightMirrorSend ? 1 : 0)}|{InjectMode(cfg)}|{(cfg.FlightDiagnostics ? 1 : 0)}|{string.Join(";", cmds)}|{seat}");
@@ -915,7 +935,7 @@ public sealed class SyncEngine : IDisposable
         if (mod != null && autoGen && profile.Schema < AircraftProfile.CurrentSchema &&
             (profile.GeneratedBy ?? "").StartsWith("UCS-ProfileGen", StringComparison.Ordinal) &&
             string.Equals(mod.Version, profile.ModVersion, StringComparison.Ordinal) &&
-            StartAutoGenerate(mod, "profile from an older UCS version, adding flight controls"))
+            StartAutoGenerate(mod, "profile made by an older UCS version, updating it"))
         {
             SetStandby();
             lock (_gate) _profileAircraft = aircraft;
@@ -943,6 +963,9 @@ public sealed class SyncEngine : IDisposable
             _modVersion = mod?.Version ?? profile.ModVersion;
             _profileHash = profile.Fingerprint();
             _localValues.Clear();
+            _controlsReported = false;   // log who has the controls in this aircraft
+            _hasControls = null;
+            _mirroring = false;
         }
         Log?.Invoke($"Profile loaded: {profile.AircraftName} ({profile.Args.Count} controls, {profile.Flight?.Count ?? 0} flight-control animations, " +
                     $"mod {Fmt(_modVersion)}, profile {_profileHash}).");

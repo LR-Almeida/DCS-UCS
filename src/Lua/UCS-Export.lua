@@ -162,6 +162,22 @@ local function getSelfName()
     return ""
 end
 
+-- Forget everything learnt about the current aircraft's flight controls. Called when leaving an
+-- aircraft (standby) and when a different flight-control list arrives, so that nothing (calibration,
+-- mirror state, a pending trim hand-over) leaks from one aircraft or seat to the next.
+local function resetFlightState()
+    UCS.fremote = {}
+    UCS.fremoteAt = 0
+    UCS.fsent = {}
+    UCS.injected = {}
+    UCS.injectOff = {}
+    UCS.cal = {}
+    UCS.axisPause, UCS.axisPauses, UCS.axisOff = {}, {}, {}
+    UCS.mirroring = false          -- set silently: no trim reset / hand-over for a change of aircraft
+    UCS.handoff = nil
+    UCS.master, UCS.seat = nil, nil
+end
+
 local function goStandby(reason)
     if UCS.active then
         log("Standby: " .. tostring(reason))
@@ -169,9 +185,7 @@ local function goStandby(reason)
     UCS.active = false
     UCS.lastValues = {}
     UCS.ignoreUntil = {}
-    UCS.fremote = {}
-    UCS.fsent = {}
-    UCS.injected = {}
+    resetFlightState()
 end
 
 local function activateIfPossible()
@@ -300,6 +314,13 @@ local function handleMessage(msg)
             if arg and f[2] and mn and mx and mn ~= mx then
                 table.insert(list, { arg = arg, axis = f[2], min = mn, max = mx })
             end
+        end
+        local text = parts[2] or ""
+        if text ~= UCS.flightText then
+            UCS.flightText = text
+            resetFlightState()
+            -- new columns for the new aircraft
+            if UCS.diag then diagClose(); UCS.flight = list; diagOpen() end
         end
         UCS.flight = list
         UCS.fsent = {}
@@ -468,14 +489,41 @@ local function trimSupported()
     return method == nil or method == 0
 end
 
+-- Axes the trim holds (yaw only when the mod's pedal trim is on)
+local function trimAxes()
+    local axes = { "pitch", "roll" }
+    if cockpitParam("PEDAL_TRIM") == 1 then table.insert(axes, "yaw") end
+    return axes
+end
+
 local function startHandoff(t)
     if not trimSupported() then return end
-    local p, r = UCS.cal["pitch"], UCS.cal["roll"]
-    if not (p and p.ok and r and r.ok) then
-        send("DIAG|Trim hand-over skipped: the stick mirror was not calibrated yet")
-        return
+    -- every trimmed axis must be calibrated, or so close to centre that its direction does not matter
+    local h = { stage = 1, due = t, axes = {} }
+    for _, axis in ipairs(trimAxes()) do
+        local cal, cands, inj = UCS.cal[axis], UCS.fcmds[axis], UCS.injected[axis]
+        local c = cands and cal and cands[cal.idx]
+        if cal and cal.ok and c and inj then
+            h.axes[axis] = { cmd = c.cmd, sign = c.sign, value = inj * c.sign }   -- injected, in axis units
+        elseif c and inj and math.abs(inj) <= 0.15 then
+            -- not calibrated but close to centre: no known direction, so just ramp its input to 0 in 1 s
+            h.axes[axis] = { cmd = c.cmd, sign = c.sign, value = inj * c.sign, ramp = inj * c.sign }
+        elseif inj and math.abs(inj) > 0.15 then
+            send("DIAG|Trim hand-over skipped: the " .. axis .. " mirror was not calibrated yet")
+            return
+        end
     end
-    UCS.handoff = { stage = 1, due = t }
+    -- goal = where the stick is NOW (the crew member's position), read before the trim starts to change
+    local cockpit = GetDevice(0)
+    for i = 1, #UCS.flight do
+        local f = UCS.flight[i]
+        local a = h.axes[f.axis]
+        if a and not a.f then
+            local v = cockpit and readArg(cockpit, f.arg)
+            a.f, a.goal = f, v and toAxis(f, v) or a.value
+        end
+    end
+    UCS.handoff = h
 end
 
 local function runHandoff(t)
@@ -487,20 +535,46 @@ local function runHandoff(t)
         h.stage, h.due = 2, t + 0.15
     elseif h.stage == 2 then
         if tr.release and tr.releaseEnd then pcall(LoSetCommand, tr.releaseEnd, 1) end
-        h.stage, h.due = 3, t + 0.15
+        -- compensation starts on this very frame: the mod begins fading the trim in right away
+        h.stage, h.due, h.started = 4, t, t
     else
-        -- input back to centre on the trimmed axes (the trim now holds the position)
-        local axes = { "pitch", "roll" }
-        if cockpitParam("PEDAL_TRIM") == 1 then table.insert(axes, "yaw") end
-        for _, axis in ipairs(axes) do
-            local cands, cal = UCS.fcmds[axis], UCS.cal[axis]
-            local c = cands and cal and cal.ok and cands[cal.idx]
-            if c then pcall(LoSetCommand, c.cmd, 0) end
+        -- the mod fades the new trim in: lower the input by exactly what the trim already holds, so
+        -- input + trim stays on the goal; done when the input is back to centre (max 5 s)
+        local cockpit = GetDevice(0)
+        local done = true
+        for _, a in pairs(h.axes) do
+            if a.ramp then
+                local want = a.ramp * math.max(0, 1 - (t - h.started) / 1.0)
+                if math.abs(want) < 0.01 then want = 0 end
+                a.value = want
+                pcall(LoSetCommand, a.cmd, want * a.sign)
+                if want ~= 0 then done = false end
+            elseif a.f and cockpit then
+                local v = readArg(cockpit, a.f.arg)
+                if v then
+                    local trimNow = toAxis(a.f, v) - a.value
+                    local want = a.goal - trimNow
+                    if want > 1 then want = 1 elseif want < -1 then want = -1 end
+                    -- never move away from centre: the input only goes down towards 0
+                    if math.abs(want) > math.abs(a.value) or (want > 0) ~= (a.value > 0) then want = a.value * 0.9 end
+                    if math.abs(want) < 0.01 or t - h.started > 5 then want = 0 end
+                    a.value = want
+                    pcall(LoSetCommand, a.cmd, want * a.sign)
+                    if want ~= 0 then done = false end
+                end
+            end
         end
-        UCS.handoff = nil
-        log("Trim handed over (" .. table.concat(axes, ", ") .. ")")
-        send("DIAG|Trim handed over: your trim now holds the stick position the crew member was flying with (" ..
-            table.concat(axes, ", ") .. ")")
+        if done then
+            local names = {}
+            for axis, _ in pairs(h.axes) do table.insert(names, axis) end
+            table.sort(names)
+            UCS.handoff = nil
+            log("Trim handed over (" .. table.concat(names, ", ") .. ")")
+            send("DIAG|Trim handed over: your trim now holds the stick position the crew member was flying with (" ..
+                table.concat(names, ", ") .. string.format(", %.1f s)", t - h.started))
+        else
+            h.due = t   -- every frame
+        end
     end
 end
 
@@ -530,7 +604,7 @@ local function updateControl(t)
                 UCS.handoff = nil
                 send("DIAG|Trim reset: you do not have the controls, your stick shows the crew member's")
             elseif not mirroring and UCS.master == true then
-                startHandoff(t)
+                startHandoff(t)          -- copies UCS.injected before it is cleared below
             end
         end
         UCS.mirroring = mirroring
@@ -592,7 +666,9 @@ local function calibrate(f, axis, cands, cal, la, target, t)
     end
     if t - cal.since < 0.5 then return end
     local c = cands[cal.idx]
-    if math.abs(la - target) < 0.12 then
+    -- levers are not always linear (OH-6A throttle idles at 0.09): a bit more tolerance there
+    local tol = (axis == "throttle" or axis == "collective") and 0.2 or 0.12
+    if math.abs(la - target) < tol then
         cal.ok = true
         log("Flight input mirror: " .. axis .. " calibrated, command " .. c.cmd .. (c.sign < 0 and " inverted" or ""))
         send("DIAG|Flight input mirror: " .. axis .. " uses command " .. c.cmd .. (c.sign < 0 and " (inverted)" or "") ..
@@ -600,7 +676,7 @@ local function calibrate(f, axis, cands, cal, la, target, t)
         return
     end
     cal.since = nil
-    if math.abs(la + target) < 0.12 then
+    if math.abs(la + target) < tol then
         for j = 1, #cands do
             if cands[j].cmd == c.cmd and cands[j].sign == -c.sign then cal.idx = j; return end
         end
