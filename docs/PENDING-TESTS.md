@@ -146,3 +146,13 @@ Still needs two players:
 - [ ] Player name detected from DCS in multiplayer
 - [ ] Auto-Connect via UCS-ServerHook.lua (and whether the chat line is hidden)
 - [ ] Installer on a PC with an existing `Export.lua` (SRS, Tacview...): other tools still work
+
+## Crews of 3 or more (later)
+
+The design has no crew-size limit (server relays to every compatible crew member; only the seat with the
+controls sends flight input, all others mirror). Not tested yet.
+
+- [ ] Simulation: test server + real client/DCS + 2 fake crew members in the same unit: switches, external
+      states and flight positions reach both; only the seat with the controls sends
+- [ ] Real mod with 3+ seats (when one is found): pairing, late join, control hand-over between any two seats
+- [ ] Mod that does not report `master`: confirm the "seat 0 flies" fallback does not block a seat that can fly
