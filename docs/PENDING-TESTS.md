@@ -15,7 +15,7 @@ The updater needs a newer release to update **to**, so the first real test happe
 - [ ] **Close DCS and update**, exit NOT confirmed within 2 minutes: switches to "update when DCS closes"
 - [ ] Same in the main menu and inside a mission (confirmation box may differ)
 - [x] **Update when DCS closes** (0.1.3 -> 0.1.4, 2026-11-16): waits while DCS runs, installs right after DCS exits
-- [ ] **Cancel scheduled update** stops the wait
+- [x] **Cancel scheduled update** stops the wait (0.1.6, 2026-11-17: DCS closed afterwards, nothing installed)
 - [x] **Skip this version** (0.1.6, 2026-11-17): no pop-up on the next start; *Check now* still shows it (to confirm)
 - [x] **Remind me later** (0.1.6, 2026-11-17): pop-up returned at the next start of the client
 - [x] UAC denied (0.1.5 -> 0.1.6, 2026-11-17): FAILED - the client closed and nothing was installed (Inno asks

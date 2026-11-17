@@ -195,6 +195,7 @@ public sealed class UpdateService : IDisposable
         catch (OperationCanceledException)
         {
             Set(UpdateStage.Available, "Scheduled update cancelled.");
+            Log?.Invoke("Scheduled update cancelled: it will not be installed when DCS closes.");
         }
     }
 
