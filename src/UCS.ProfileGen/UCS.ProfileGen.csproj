@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <ApplicationIcon>$(MSBuildThisFileDirectory)..\..\assets\ucs.ico</ApplicationIcon>
+    <ApplicationIcon>$(MSBuildThisFileDirectory)..\..\assets\ucs-profilegen.ico</ApplicationIcon>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>UCS-ProfileGen</AssemblyName>
     <RootNamespace>UCS.ProfileGen</RootNamespace>
