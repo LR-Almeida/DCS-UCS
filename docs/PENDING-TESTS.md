@@ -14,7 +14,7 @@ The updater needs a newer release to update **to**, so the first real test happe
       DCS closes normally (never killed) and the update installs
 - [ ] **Close DCS and update**, exit NOT confirmed within 2 minutes: switches to "update when DCS closes"
 - [ ] Same in the main menu and inside a mission (confirmation box may differ)
-- [ ] **Update when DCS closes**: waits while DCS runs, installs right after DCS exits
+- [x] **Update when DCS closes** (0.1.3 -> 0.1.4, 2026-11-16): waits while DCS runs, installs right after DCS exits
 - [ ] **Cancel scheduled update** stops the wait
 - [ ] **Skip this version**: no pop-up on the next automatic check; *Check now* still shows it
 - [ ] **Remind me later**: pop-up returns on the next automatic check (startup / 6 h)
