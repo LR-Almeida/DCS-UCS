@@ -200,10 +200,71 @@ public sealed class MainForm : Form
         root.Controls.Add(flight);
 
         scroll.Controls.Add(root);
-        // Tell the panel how big the content is so it always shows scroll bars when needed
-        void UpdateScrollArea() => scroll.AutoScrollMinSize = new Size(root.PreferredSize.Width + 16, root.PreferredSize.Height + 16);
-        root.SizeChanged += (_, _) => UpdateScrollArea();
-        scroll.Layout += (_, _) => UpdateScrollArea();
+        // Vertical scrolling only: the content always takes the panel's width and long texts wrap onto more
+        // lines when the window gets narrow (no horizontal scroll bar).
+        scroll.AutoScroll = false;
+        scroll.HorizontalScroll.Maximum = 0;
+        scroll.HorizontalScroll.Enabled = false;
+        scroll.HorizontalScroll.Visible = false;
+        scroll.AutoScroll = true;
+        var fitting = false;
+        var lastWidth = -1;
+        void FitWidth()
+        {
+            if (fitting) return;
+            // reserve the vertical bar's width always, so showing it never makes the text re-wrap in a loop
+            var avail = Math.Max(260, scroll.ClientSize.Width - scroll.Padding.Horizontal - 8 -
+                                      (scroll.VerticalScroll.Visible ? 0 : SystemInformation.VerticalScrollBarWidth));
+            if (avail == lastWidth) { scroll.AutoScrollMinSize = new Size(0, root.PreferredSize.Height + 16); return; }
+            fitting = true;
+            try
+            {
+                lastWidth = avail;
+                var valueWidth = Math.Max(140, avail - 190);   // minus the label column and group box padding
+                foreach (var c in Descendants(root))
+                {
+                    var inValueColumn = c.Parent is TableLayoutPanel t && t != root && t.GetColumn(c) == 1 || c.Parent is FlowLayoutPanel;
+                    switch (c)
+                    {
+                        case CheckBox cb:
+                            // a CheckBox does not wrap by itself: size it for the wrapped text
+                            var textWidth = valueWidth - 24;
+                            var natural = TextRenderer.MeasureText(cb.Text, cb.Font);
+                            if (natural.Width + 24 <= valueWidth)
+                            {
+                                cb.AutoSize = true;
+                                cb.MaximumSize = Size.Empty;
+                            }
+                            else
+                            {
+                                var wrapped = TextRenderer.MeasureText(cb.Text, cb.Font, new Size(textWidth, int.MaxValue), TextFormatFlags.WordBreak);
+                                cb.AutoSize = false;
+                                cb.CheckAlign = ContentAlignment.TopLeft;
+                                cb.TextAlign = ContentAlignment.TopLeft;
+                                cb.Size = new Size(valueWidth, wrapped.Height + 6);
+                            }
+                            break;
+                        case TextBox tb:
+                            tb.Tag ??= tb.Width;                         // designed width
+                            tb.Width = Math.Min((int)tb.Tag, valueWidth - 8);
+                            break;
+                        case Label l when inValueColumn:
+                            l.AutoSize = true;
+                            l.MaximumSize = new Size(valueWidth, 0);
+                            break;
+                        case FlowLayoutPanel f:
+                            f.WrapContents = f.FlowDirection == FlowDirection.LeftToRight || f.WrapContents;
+                            f.MaximumSize = new Size(valueWidth, 0);
+                            break;
+                    }
+                }
+                root.MaximumSize = new Size(avail, 0);
+                scroll.AutoScrollMinSize = new Size(0, root.PreferredSize.Height + 16);
+            }
+            finally { fitting = false; }
+        }
+        scroll.ClientSizeChanged += (_, _) => FitWidth();
+        root.SizeChanged += (_, _) => FitWidth();
         page.Controls.Add(scroll);
         return page;
     }
@@ -410,6 +471,15 @@ public sealed class MainForm : Form
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         return grid;
+    }
+
+    private static IEnumerable<Control> Descendants(Control parent)
+    {
+        foreach (Control c in parent.Controls)
+        {
+            yield return c;
+            foreach (var d in Descendants(c)) yield return d;
+        }
     }
 
     private static void AddRow(TableLayoutPanel grid, string label, Control control)
