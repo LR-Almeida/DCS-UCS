@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <ApplicationIcon>$(MSBuildThisFileDirectory)..\..\assets\ucs.ico</ApplicationIcon>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>UCS-Server</AssemblyName>
     <RootNamespace>UCS.Server</RootNamespace>
