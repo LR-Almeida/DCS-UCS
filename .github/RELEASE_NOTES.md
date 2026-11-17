@@ -15,27 +15,26 @@
 Windows 10/11 x64. No .NET install needed (self-contained). The executables are not code-signed yet, so
 Windows SmartScreen may warn on first run.
 
-## What's new in 0.1.5-alpha
+## What's new in 0.1.6-alpha
 
-- **Trim hand-over:** the trim now goes with the controls. When you lose the controls your trim is reset,
-  so your stick shows exactly the pilot's; when you take them, your trim is set to the position the
-  aircraft was being flown with, so a spring joystick at centre continues without a jump (pedals too
-  when the mod's pedal trim is on). The trim commands are found automatically in each mod
-  (OH-6A, AH-6J: trim release/reset; UH-60L: trim set/reset, still to be verified). Not used with
-  force-feedback / springless sticks (mod option).
-- **No more stick flicker in the copilot seat:** the pilot re-sends the full stick / pedals / collective
-  position every 0.4 s, so the other seat always has a value to show, and the mirror no longer pauses
-  while DCS reports who has the controls (the pause let the native multicrew flicker through).
-- **Robust axis calibration:** works while the pilot is moving the stick, switches straight to the
-  inverted command when the animation moves the wrong way, and retries instead of giving up.
-- Collective keeps the last mirrored position after a handover until you move your own.
-- Profiles are regenerated once (they now list the trim commands).
+- **External states:** doors, landing light, searchlight and other things a mod changes only from the
+  keyboard now follow the crew member who changed them. Found automatically in each mod's scripts (OH-6A,
+  AH-6J/MH-6J, UH-60L...): UCS presses the mod's own key command on the other seat. Verified in game on the
+  OH-6A (doors, landing light). Weapons, engine, fuel and cargo are never touched.
+- **Throttle mirrored**, and every axis now uses the input commands the mod itself binds (UH-60L collective,
+  OH-6A/AH-6J throttle...): no more guessing per aircraft.
+- **Smooth trim hand-over:** the stick no longer wobbles while the mod fades the new trim in.
+- **Fixes from the 2026-11-17 flights:** a trim hand-over happened when entering another aircraft without
+  the controls; the calibration of one aircraft was reused in the next one (UH-60L mirror wrong); the
+  hand-over was skipped when an axis near centre was not calibrated yet; diagnostic columns of the wrong
+  aircraft.
+- UCS-Server writes `UCS-Server.log` (Saved Games\DCS\Logs\UCS); build uses current GitHub Actions.
 
-**Restart DCS after updating.** Both crew members need 0.1.5.
+**Restart DCS after updating.** Both crew members and the UCS-Server need 0.1.6 for the external states.
+Profiles are regenerated once.
 
-### Since 0.1.3
-- Crew members in the second seat are paired (0.1.4).
-- Automatic flight mirror while you do not have the controls (0.1.3).
+### Since 0.1.4
+- Trim goes with the controls; no stick flicker in the copilot seat; robust calibration (0.1.5).
 
 ## Quick test
 

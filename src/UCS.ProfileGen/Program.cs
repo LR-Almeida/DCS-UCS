@@ -135,6 +135,10 @@ Console.WriteLine($"Profile fingerprint:     {result.Profile.Fingerprint()}");
 var axisCmds = result.Profile.FlightCommands;
 Console.WriteLine("Axis commands (mod):     " + (axisCmds == null ? "none" :
                   string.Join(", ", axisCmds.Select(kv => $"{kv.Key} {string.Join("/", kv.Value)}"))));
+var ext = result.Profile.External;
+Console.WriteLine("External states:         " + (ext == null ? "none" :
+                  string.Join(" | ", ext.Select(g => $"args {string.Join(",", g.Args)} <- keys {string.Join(",", g.Commands)}" +
+                      (g.Prefer == null ? "" : " [" + string.Join(" ", g.Prefer.Select(kv => $"{kv.Key}>{string.Join("/", kv.Value)}")) + "]")))));
 var trim = result.Profile.Trim;
 Console.WriteLine($"Trim commands:           " + (trim == null ? "none" :
                   $"release {trim.Release?.ToString() ?? "-"} / release-end {trim.ReleaseEnd?.ToString() ?? "-"} / set {trim.Set?.ToString() ?? "-"} / reset {trim.Reset?.ToString() ?? "-"}" +

@@ -28,6 +28,7 @@ hosts its own lightweight `UCS-Server.exe`.
 - **Local, automatic profiles** — the client builds each aircraft profile on your own PC from the mod you installed, and rebuilds it when the mod is updated. No profiles are distributed.
 - **Version check** — crew members only sync when they run the **same mod version and profile**; otherwise the client shows a compatibility error.
 - **Flight controls mirror (experimental, 0.1.2+)** — the stick, pedals and collective animations of the crew member flying are sent to the others, so the copilot can see the pilot's inputs. See *Flight controls* below.
+- **External states (0.1.6+)** — doors, landing light and other things a mod changes only from the keyboard follow the crew member who changed them (found automatically in each mod's scripts).
 - **Plays nice with other mods** — `Export.lua` callbacks are chained; SRS, Tacview, DCS-BIOS keep working.
 
 ## Components

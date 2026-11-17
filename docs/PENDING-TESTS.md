@@ -98,6 +98,17 @@ Third two-player test, 2026-11-17 (0.1.5 with Pedro, OH-6A / UH-60L / AH-6J / MH
 - [ ] 0.1.6 in flight: UH-60L calibration from scratch (collective 2087 from the mod bindings) and its
       trim set/reset hand-over; AH-6J arg 111 (Argus ENR button) flicker - button pressed or echo?
 
+External states, automated in game 2026-11-17 (OH-6A single player + fake crew member on a test UCS-Server,
+logs in `test-logs6-11-17-estado-externo-automatizado`):
+
+- [x] Crew opens/closes the door -> this OH-6A follows (Keys.ToggleDoors, args 38/35) in < 7 s
+- [x] Crew turns the landing light on -> follows (Keys.LandingLight, arg 115), first try
+- [x] No cockpit switch moved (first version pressed acol_light_on, a switch shortcut -> now excluded and
+      any switch moved by a try is restored)
+- [x] A change made in this seat is sent to the crew and not undone by the crew's older state
+- [ ] Two players: doors / landing light / searchlight both ways; late joiner gets the external states;
+      UH-60L and AH-6J/MH-6J
+
 Still needs two players:
 
 - [ ] Profile regenerated automatically ("N flight-control animations" in the log; OH-6A 7, UH-60L 4)

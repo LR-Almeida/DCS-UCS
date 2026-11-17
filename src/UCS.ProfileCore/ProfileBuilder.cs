@@ -109,6 +109,17 @@ public static class ProfileBuilder
             };
         }
 
+        // External-model states changed only from the keyboard (doors, landing light...).
+        try
+        {
+            var ext = ExternalStateParser.Parse(scriptsDir, result.Warnings);
+            profile.External = ext.Count > 0 ? ext : null;
+        }
+        catch (Exception ex)
+        {
+            result.Warnings.Add("External state scan failed: " + ex.Message);
+        }
+
         // Input commands of the flight axes, from the mod's own joystick bindings.
         try
         {

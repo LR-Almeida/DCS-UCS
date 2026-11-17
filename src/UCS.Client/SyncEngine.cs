@@ -98,6 +98,8 @@ public sealed class SyncEngine : IDisposable
     private long _sentArgs, _receivedArgs;
     private long _flightSent, _flightReceived;
     private bool _flightSupported;
+    private bool _extSupported;
+    private readonly Dictionary<string, double> _extValues = new(StringComparer.Ordinal);   // settled external states (EXTFULL)
     private bool _flightWarned;
     private int _seat = 1;              // multicrew seat reported by the hook (1 = first seat)
 
@@ -247,6 +249,7 @@ public sealed class SyncEngine : IDisposable
             _serverChecked = false;
             _serverVersion = "";
             _flightSupported = false;
+            _extSupported = false;
             _peers = new List<string>();
             _ = ServerReceiveLoopAsync(_serverUdp, _serverCts.Token);
         }
@@ -401,8 +404,9 @@ public sealed class SyncEngine : IDisposable
                         _serverChecked = true;
                         _serverVersion = msg.Version ?? "";
                         serverNotes.AddRange(DescribeServerCapabilities(msg));
-                        _flightSupported = (msg.Features ?? UCS.Common.Protocol.Features.Level1.ToList())
-                            .Contains(UCS.Common.Protocol.Features.FlightMirror);
+                        var feats = msg.Features ?? UCS.Common.Protocol.Features.Level1.ToList();
+                        _flightSupported = feats.Contains(UCS.Common.Protocol.Features.FlightMirror);
+                        _extSupported = feats.Contains(UCS.Common.Protocol.Features.ExternalState);
                     }
                     if (msg.Crew != null)
                     {
@@ -431,6 +435,9 @@ public sealed class SyncEngine : IDisposable
                 break;
             case Protocol.Flight:
                 ApplyRemoteFlight(msg);
+                break;
+            case Protocol.Ext:
+                ApplyRemoteExt(msg);
                 break;
         }
     }
@@ -474,8 +481,26 @@ public sealed class SyncEngine : IDisposable
             values = _localValues.ToList();
             aircraft = _profileAircraft;
         }
+        Dictionary<string, double> ext;
+        bool extOk;
+        lock (_gate)
+        {
+            ext = new Dictionary<string, double>(_extValues);
+            extOk = _extSupported;
+        }
+        if (extOk && ext.Count > 0)
+            SendToServer(new UcsMessage
+            {
+                Type = Protocol.Ext,
+                ClientId = _clientId,
+                Aircraft = aircraft,
+                Target = targetId,
+                Seq = Interlocked.Increment(ref _seq),
+                Values = ext,
+            });
         if (values.Count == 0) return;
-        Log?.Invoke($"Sending cockpit state to {name ?? "new crew member"} ({values.Count} args).");
+        Log?.Invoke($"Sending cockpit state to {name ?? "new crew member"} ({values.Count} args" +
+                    (extOk && ext.Count > 0 ? $", {ext.Count} external states" : "") + ").");
         foreach (var chunk in values.Chunk(MaxArgsPerPacket))
         {
             SendToServer(new UcsMessage
@@ -531,6 +556,19 @@ public sealed class SyncEngine : IDisposable
         if (entries.Count > 0) _bridge.SendToExport("FSET|" + string.Join(";", entries));
     }
 
+    /// <summary>External states of the crew -> Export (it presses the mod's own key command when they differ).</summary>
+    private void ApplyRemoteExt(UcsMessage msg)
+    {
+        if (msg.Values == null || msg.Values.Count == 0) return;
+        lock (_gate)
+        {
+            if (IsStandby || _profile?.External == null) return;
+            if (!string.Equals(msg.Aircraft, _profileAircraft, StringComparison.OrdinalIgnoreCase)) return;
+        }
+        _bridge.SendToExport("EXTSET|" + string.Join(";", msg.Values.Select(kv =>
+            $"{kv.Key}={kv.Value.ToString("0.###", CultureInfo.InvariantCulture)}")));
+    }
+
     /// <summary>Tells the Export which flight args to watch (sent after the profile).</summary>
     private void SendFlightArgs(AircraftProfile profile)
     {
@@ -538,6 +576,10 @@ public sealed class SyncEngine : IDisposable
         static string F(double d) => d.ToString("0.####", CultureInfo.InvariantCulture);
         _bridge.SendToExport("FLIGHT|" + string.Join(";", list.Select(f => $"{f.Arg}:{f.Axis}:{F(f.Min)}:{F(f.Max)}")));
         // TRIM|<release>|<releaseEnd>|<set>|<reset>  (empty fields = not available)
+        // EXTDEF|<args>:<cmds>|...  external states (empty = none)
+        var ext = profile.External ?? new List<ExternalGroup>();
+        _bridge.SendToExport("EXTDEF|" + string.Join("|", ext.Select(g => $"{string.Join(",", g.Args)}:{string.Join(",", g.Commands)}:" +
+            string.Join("/", (g.Prefer ?? new Dictionary<int, List<int>>()).Select(kv => $"{kv.Key}>{string.Join(",", kv.Value)}")))));
         var t = profile.Trim;
         _bridge.SendToExport(t is { CanHandOver: true }
             ? $"TRIM|{t.Release}|{t.ReleaseEnd}|{t.Set}|{t.Reset}"
@@ -747,6 +789,39 @@ public sealed class SyncEngine : IDisposable
                 }
                 if (mirrorChanged && !controlsChanged)
                     Log?.Invoke(mirroring ? "Flight mirror active." : "Flight mirror inactive.");
+                break;
+            }
+
+            case "EXT":
+            case "EXTFULL":
+            {
+                // EXT = settled change (broadcast); EXTFULL = all settled states, kept for late joiners
+                var values = new Dictionary<string, double>();
+                string aircraft;
+                bool send;
+                lock (_gate)
+                {
+                    _exportLastSeen = Now;
+                    if (_profile == null) return;
+                    aircraft = _profileAircraft;
+                    foreach (var entry in (parts.Length > 1 ? parts[1] : "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var kv = entry.Split('=');
+                        if (kv.Length != 2 || !double.TryParse(kv[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var val)) continue;
+                        values[kv[0]] = val;
+                        _extValues[kv[0]] = val;
+                    }
+                    send = parts[0] == "EXT" && values.Count > 0 && _extSupported && _connectRequested && !IsStandby;
+                }
+                if (send)
+                    SendToServer(new UcsMessage
+                    {
+                        Type = Protocol.Ext,
+                        ClientId = _clientId,
+                        Aircraft = aircraft,
+                        Seq = Interlocked.Increment(ref _seq),
+                        Values = values,
+                    });
                 break;
             }
 
@@ -964,6 +1039,7 @@ public sealed class SyncEngine : IDisposable
             _profileHash = profile.Fingerprint();
             _localValues.Clear();
             _controlsReported = false;   // log who has the controls in this aircraft
+            _extValues.Clear();
             _hasControls = null;
             _mirroring = false;
         }

@@ -9,7 +9,7 @@ namespace UCS.Common;
 /// </summary>
 public static class Protocol
 {
-    public const string Version = "0.1.5-alpha";
+    public const string Version = "0.1.6-alpha";
     public const int DefaultServerPort = 5055;
     public const int ExportSendPort = 5051;   // Export.lua -> Client
     public const int ExportListenPort = 5052; // Client -> Export.lua
@@ -19,9 +19,9 @@ public static class Protocol
     /// <summary>
     /// Wire protocol level. 1 = 0.1.0-alpha (no field sent). Raised when messages gain fields;
     /// old peers simply ignore unknown JSON fields, so newer clients keep working with old servers.
-    /// 3 = 0.1.2-alpha ("flight" messages).
+    /// 3 = 0.1.2-alpha ("flight" messages). 4 = 0.1.6-alpha ("ext" messages).
     /// </summary>
-    public const int Level = 3;
+    public const int Level = 4;
 
     /// <summary>
     /// Format of "args" values. Only a change here breaks sync between crew members, so the
@@ -38,6 +38,8 @@ public static class Protocol
         public const string UcsVersionCheck = "ucs_version_check";
         /// <summary>Server relays "flight" messages (stick / pedals / collective positions).</summary>
         public const string FlightMirror = "flight_mirror";
+        /// <summary>Server relays "ext" messages (external-model states such as doors and lights).</summary>
+        public const string ExternalState = "ext_state";
 
         /// <summary>Feature -> (minimum server version, what the user loses without it).</summary>
         public static readonly IReadOnlyDictionary<string, (string MinServer, string Description)> Known =
@@ -46,6 +48,7 @@ public static class Protocol
                 [ModCheck] = ("0.1.0-alpha", "mod version / profile compatibility check"),
                 [UcsVersionCheck] = ("0.1.1-alpha", "UCS version check between crew members (warning when a crew member runs another UCS version)"),
                 [FlightMirror] = ("0.1.2-alpha", "flight controls mirror (stick, pedals and collective positions of the crew member flying)"),
+                [ExternalState] = ("0.1.6-alpha", "external states (doors, lights and other things the mod changes only from the keyboard)"),
             };
 
         /// <summary>Features of a server that does not announce them (0.1.0-alpha).</summary>
@@ -56,6 +59,7 @@ public static class Protocol
     public const string State = "state";            // C->S join + heartbeat
     public const string Args = "args";              // C->S->C argument changes
     public const string Flight = "flight";          // C->S->C flight-control positions (level 3+, ~30 Hz)
+    public const string Ext = "ext";                // C->S->C external-model states (level 4+)
     public const string Leave = "leave";            // C->S
     public const string Welcome = "welcome";        // S->C heartbeat ack + session info
     public const string PeerJoined = "peer_joined"; // S->C ask for a snapshot for the new peer

@@ -22,8 +22,9 @@ public sealed class AircraftProfile
     /// animation arguments (<see cref="Flight"/>). Older generated profiles are regenerated.
     /// </summary>
     public int Schema { get; set; } = 1;
-    /// <summary>3 = also lists the trim commands (<see cref="Trim"/>); 4 = axis commands from the mod's bindings.</summary>
-    public const int CurrentSchema = 4;
+    /// <summary>3 = trim commands (<see cref="Trim"/>); 4 = axis commands from the mod's bindings;
+    /// 5 = external states (<see cref="External"/>); 6 = external states with per-arg commands.</summary>
+    public const int CurrentSchema = 6;
     /// <summary>Flight-control animation args (stick, pedals, collective...), mirrored from whoever flies.</summary>
     public List<FlightArg>? Flight { get; set; }
     /// <summary>The mod's cyclic trim commands (null when the mod declares none).</summary>
@@ -33,6 +34,8 @@ public sealed class AircraftProfile
     /// Input/joystick/default.lua. First candidates of the flight mirror calibration.
     /// </summary>
     public Dictionary<string, List<int>>? FlightCommands { get; set; }
+    /// <summary>External-model states the mod changes only from the keyboard (doors, landing light...).</summary>
+    public List<ExternalGroup>? External { get; set; }
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -99,6 +102,22 @@ public sealed class TrimCommands
     public int? Reset { get; set; }
 
     public bool CanHandOver => Reset != null && ((Release != null && ReleaseEnd != null) || Set != null);
+}
+
+/// <summary>
+/// A mod script that animates external draw arguments and listens to key commands: when a crew member's
+/// settled value of one of <see cref="Args"/> differs, the other seat presses the mod's own command (learning
+/// which one of <see cref="Commands"/> changes that argument).
+/// </summary>
+public sealed class ExternalGroup
+{
+    public List<int> Args { get; set; } = new();
+    public List<int> Commands { get; set; } = new();
+    /// <summary>
+    /// Per argument, the commands that (from the script itself) change the variable animating it, e.g.
+    /// arg 115 = taxi_light, set by Keys.LandingLight. Tried first; the other commands only as a fallback.
+    /// </summary>
+    public Dictionary<int, List<int>>? Prefer { get; set; }
 }
 
 /// <summary>Axis names used in <see cref="FlightArg.Axis"/>.</summary>

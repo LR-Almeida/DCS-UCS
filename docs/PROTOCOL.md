@@ -84,6 +84,25 @@ model (not readable). So the trim is handed over with the controls instead of be
 The pilot also re-sends the full flight state every 0.4 s, and the seat without the controls never
 pauses the mirror while DCS reports who has them (pausing only showed the native multicrew flicker).
 
+### External states (0.1.6+)
+
+Some states are changed only from the keyboard and animate the external model: OH-6A doors
+(`Keys.ToggleDoors` → external arg 38), landing light (`Keys.LandingLight` → arg 115)... The profile
+generator scans the mod's cockpit scripts: for each script, the external draw args it sets and the
+`Keys.*` commands it listens to, skipping weapons/engine/fuel/cargo scripts, brightness/movement commands
+and commands that only press a cockpit switch (`performClickableAction`, already synced by the switch
+channel). It also ties each argument to the command that changes the variable animating it
+(`LandingLight` sets `taxi_light`, which animates arg 115). Client → Export:
+`EXTDEF|args:cmds:arg>cmd,cmd/arg>cmd|...`.
+
+The Export reads the external args (`LoGetAircraftDrawArgumentValue`), sends settled changes (`EXT`,
+relayed as `ext` messages, server feature `ext_state`) and every 5 s the full state (`EXTFULL`, kept by the
+client for late joiners). The initial state after entering an aircraft is never broadcast: the crew member
+already in the aircraft wins. A receiver whose settled value differs by more than 0.3 presses the mod's own
+command, verifies it after 2.5 s and learns it; it acts only with a command known to change that argument,
+restores any cockpit switch the press moved, undoes a toggle that changed another argument, gives up after
+8 tries, and never lets an older crew state undo a change made in its own seat.
+
 ## Hook → Client (JSON)
 
 ```json

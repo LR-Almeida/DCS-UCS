@@ -71,7 +71,7 @@ public static partial class AxisCommandParser
     }
 
     /// <summary>Runs command_defs.lua in a sandbox and returns "Table.name" -> number (Keys.*, EFM_commands.*...).</summary>
-    private static Dictionary<string, int> EvaluateCommandDefs(string scriptsDir, List<string>? warnings)
+    public static Dictionary<string, int> EvaluateCommandDefs(string scriptsDir, List<string>? warnings)
     {
         var map = new Dictionary<string, int>(StringComparer.Ordinal);
         var path = Path.Combine(scriptsDir, "command_defs.lua");

@@ -31,10 +31,15 @@
 --            inject 2 = forced (tests only, also with the controls)
 --      FSET|<arg>=<val>;...                      flight args of whoever is flying
 --      TRIM|<release>|<releaseEnd>|<set>|<reset> the mod's trim commands (hand-over)
+--      EXTDEF|<args>:<cmds>:<arg>><cmd>,<cmd>/<arg>><cmd>|...   external states per mod script
+--            (args it animates, safe key commands it listens to, commands known to change each arg)
+--      EXTSET|<arg>=<val>;...                    external state of the crew
 --    Export -> Client
 --      FLT|<arg>=<val>;...                       local flight args (~30 Hz, on change)
 --      DIAG|<text>                               diagnostic messages for the client log
 --      CTRL|<master 1/0/?>|<seat 0-based/?>|<mirroring 0/1>   who has the controls (on change + every 2 s)
+--      EXT|<arg>=<val>;...                       settled change of an external state (broadcast)
+--      EXTFULL|<arg>=<val>;...                   all settled external states every 5 s (late joiners)
 --
 --  "inject" (experimental) feeds the received stick position into this seat as joystick input
 --  (LoSetCommand) so the mod animates the stick like the pilot's. Automatic: it runs only while
@@ -45,7 +50,7 @@
 -- =============================================================================
 
 local UCS = {
-    version       = "0.1.5-alpha",
+    version       = "0.1.6-alpha",
     host          = "127.0.0.1",
     sendPort      = 5051,
     listenPort    = 5052,
@@ -79,6 +84,7 @@ UCS.seat         = nil       -- LoGetPlayerSeat() (0-based, nil = unknown)
 UCS.mirroring    = false
 UCS.trim         = nil       -- { release=, releaseEnd=, set=, reset= } (command ids) or nil
 UCS.handoff      = nil       -- trim hand-over in progress { stage=, due= }
+UCS.ext          = { groups = {}, byArg = {}, text = "" }   -- external states (see extFrame)
 UCS.nextCtrlSend = 0
 UCS.fdiag        = false
 UCS.fcmds        = {}        -- axis -> { cmd=, sign= }
@@ -176,6 +182,7 @@ local function resetFlightState()
     UCS.mirroring = false          -- set silently: no trim reset / hand-over for a change of aircraft
     UCS.handoff = nil
     UCS.master, UCS.seat = nil, nil
+    if UCS.extReset then UCS.extReset() end
 end
 
 local function goStandby(reason)
@@ -365,6 +372,44 @@ local function handleMessage(msg)
             UCS.trim = { release = r, releaseEnd = re, set = st, reset = rs }
         else
             UCS.trim = nil
+        end
+    elseif kind == "EXTDEF" then
+        local text = table.concat(parts, "|", 2)
+        if text ~= UCS.ext.text then
+            local groups, byArg = {}, {}
+            for i = 2, #parts do
+                local ac = split(parts[i], ":")
+                local g = { args = {}, cmds = {}, prefer = {}, hasPrefer = false }
+                for _, a in ipairs(split(ac[1] or "", ",")) do local n = tonumber(a); if n then table.insert(g.args, n) end end
+                for _, c in ipairs(split(ac[2] or "", ",")) do local n = tonumber(c); if n then table.insert(g.cmds, n) end end
+                for _, pr in ipairs(split(ac[3] or "", "/")) do
+                    local kv = split(pr, ">")
+                    local a = tonumber(kv[1])
+                    if a then
+                        g.prefer[a] = {}
+                        for _, c in ipairs(split(kv[2] or "", ",")) do local n = tonumber(c); if n then table.insert(g.prefer[a], n) end end
+                        g.hasPrefer = true
+                    end
+                end
+                if #g.args > 0 and #g.cmds > 0 then
+                    table.insert(groups, g)
+                    for _, a in ipairs(g.args) do byArg[a] = byArg[a] or g end
+                end
+            end
+            UCS.ext.groups, UCS.ext.byArg, UCS.ext.text = groups, byArg, text
+            if UCS.extReset then UCS.extReset() end
+            log("External states: " .. #groups .. " group(s)")
+        end
+    elseif kind == "EXTSET" then
+        local t = wall()
+        for _, e in ipairs(split(parts[2] or "", ";")) do
+            local kv = split(e, "=")
+            local arg, val = tonumber(kv[1]), tonumber(kv[2])
+            if arg and val and UCS.ext.byArg[arg] then
+                if UCS.ext.remote[arg] == nil or math.abs(UCS.ext.remote[arg] - val) > 0.02 then UCS.ext.remoteAt[arg] = t end
+                UCS.ext.remote[arg] = val
+                UCS.ext.tries[arg] = 0       -- a new state from the crew: allow new tries
+            end
         end
     elseif kind == "FSET" then
         local entries = split(parts[2] or "", ";")
@@ -741,6 +786,155 @@ local function injectFlight(cockpit, t)
 end
 
 
+
+-- -----------------------------------------------------------------------------
+-- External states (0.1.6): doors, landing light... that the mod changes only from the keyboard.
+-- The profile lists, per mod script, the external draw args it animates and the key commands it
+-- listens to (EXTDEF). A settled local change is sent (EXT); a crew member whose settled value
+-- differs presses the mod's own command, learning which one fixes that argument. Guards: only
+-- settled, non-negative values; a try that changes something else is undone; max tries per arg.
+-- -----------------------------------------------------------------------------
+local function extReset()
+    UCS.ext.loc, UCS.ext.sent, UCS.ext.remote, UCS.ext.remoteAt = {}, {}, {}, {}
+    UCS.ext.learned, UCS.ext.bad, UCS.ext.tries, UCS.ext.blocked = {}, {}, {}, {}
+    UCS.ext.pending, UCS.ext.primed = nil, false
+    UCS.ext.ownAt, UCS.ext.appliedAt = {}, {}
+    UCS.ext.nextScan, UCS.ext.nextApply, UCS.ext.nextFull = 0, 0, 0
+    UCS.ext.startAt = nil
+end
+
+local function extRead(arg)
+    local ok, v = pcall(LoGetAircraftDrawArgumentValue, arg)
+    if ok and type(v) == "number" then return v end
+    return nil
+end
+
+local function extSettled(e, arg, t, secs)
+    local l = e.loc[arg]
+    return l and t - l.since >= secs
+end
+
+local function extFrame(t)
+    local e = UCS.ext
+    if #e.groups == 0 or type(LoGetAircraftDrawArgumentValue) ~= "function" then return end
+    if t < e.nextScan then return end
+    e.nextScan = t + 0.1
+    e.startAt = e.startAt or t
+
+    -- 1) local values and how long each has been steady
+    for arg, _ in pairs(e.byArg) do
+        local v = extRead(arg)
+        if v then
+            local l = e.loc[arg]
+            if not l then e.loc[arg] = { v = v, since = t }
+            elseif math.abs(v - l.v) > 0.02 then l.v, l.since = v, t end
+        end
+    end
+
+    -- 2) send settled changes; the first values after entering the aircraft are only primed (the crew
+    --    member already there wins: newcomers get its state through the snapshot)
+    local out, full = {}, {}
+    for arg, l in pairs(e.loc) do
+        if t - l.since >= 0.5 then
+            table.insert(full, arg .. "=" .. string.format("%.3f", l.v))
+            local s = e.sent[arg]
+            if s == nil then
+                e.sent[arg] = l.v
+            elseif math.abs(l.v - s) > 0.05 then
+                e.sent[arg] = l.v
+                if e.primed then table.insert(out, arg .. "=" .. string.format("%.3f", l.v)) end
+                -- a change made in this seat (not by one of our presses): an older crew state must not undo it
+                if not e.pending and t - (e.appliedAt[arg] or -100) > 3 then e.ownAt[arg] = t end
+            end
+        end
+    end
+    if not e.primed and t - e.startAt > 3 then e.primed = true end
+    if #out > 0 then send("EXT|" .. table.concat(out, ";")) end
+    if t >= e.nextFull and #full > 0 then
+        e.nextFull = t + 5
+        send("EXTFULL|" .. table.concat(full, ";"))   -- kept by the client for late joiners, not broadcast
+    end
+
+    -- 3) a try in progress: did it fix the argument?
+    local p = e.pending
+    if p then
+        if t - p.at < 2.5 then return end
+        local l, r = e.loc[p.arg], e.remote[p.arg]
+        if l and r and math.abs(l.v - r) <= 0.15 then
+            e.learned[p.arg] = p.cmd
+            send("DIAG|External state: arg " .. p.arg .. " synced with key command " .. p.cmd)
+        else
+            e.bad[p.arg] = e.bad[p.arg] or {}
+            e.bad[p.arg][p.cmd] = true
+            -- side effect on a cockpit switch: put it back with the switch's own clickable command
+            local cockpit = GetDevice(0)
+            if cockpit and UCS.profile and p.switches then
+                for a, old in pairs(p.switches) do
+                    local now = readArg(cockpit, a)
+                    local def = UCS.profile.args[a]
+                    if def and old and now and math.abs(now - old) > 0.01 then
+                        pcall(function() GetDevice(def.dev):performClickableAction(def.cmd, old) end)
+                        send("DIAG|External state: key command " .. p.cmd .. " moved cockpit switch " .. a .. " - restored")
+                    end
+                end
+            end
+            -- side effect on another argument of the same script: press again to undo (toggle)
+            for arg, before in pairs(p.before) do
+                local now = e.loc[arg]
+                if arg ~= p.arg and now and math.abs(now.v - before) > 0.3 then
+                    pcall(LoSetCommand, p.cmd, 1)
+                    send("DIAG|External state: key command " .. p.cmd .. " changed arg " .. arg .. " instead of " .. p.arg .. " - undone")
+                    break
+                end
+            end
+        end
+        e.pending = nil
+        e.nextApply = t + 1.0
+        return
+    end
+
+    -- 4) apply one difference at a time (settled on both sides, plain on/off-like values)
+    if t < e.nextApply or not e.primed then return end
+    for arg, r in pairs(e.remote) do
+        local l = e.loc[arg]
+        if l and not e.blocked[arg] and t - (e.remoteAt[arg] or t) >= 1.0 and extSettled(e, arg, t, 1.5)
+            and l.v >= -0.05 and r >= -0.05 and math.abs(l.v - r) > 0.3
+            and (e.remoteAt[arg] or 0) > (e.ownAt[arg] or -1) then
+            local g = e.byArg[arg]
+            -- Only commands known to change this argument: the ones the script itself ties to it, or the
+            -- single command of a script. Ambiguous cases are left alone (never guess in a crewed aircraft).
+            local cands = g.prefer[arg]
+            if not cands and not g.hasPrefer and #g.cmds == 1 then cands = g.cmds end
+            local cmd = e.learned[arg]
+            if not cmd and cands then
+                for _, c in ipairs(cands) do
+                    if not (e.bad[arg] and e.bad[arg][c]) then cmd = c; break end
+                end
+            end
+            if not cands then e.blocked[arg] = true; return end
+            e.tries[arg] = (e.tries[arg] or 0) + 1
+            if not cmd or e.tries[arg] > 8 then
+                e.blocked[arg] = true
+                send("DIAG|External state: arg " .. arg .. " could not be synced (no key command of the mod changes it)")
+            else
+                local before = {}
+                for _, a in ipairs(g.args) do if e.loc[a] then before[a] = e.loc[a].v end end
+                local switches = {}
+                local cockpit = GetDevice(0)
+                if cockpit and UCS.profile then
+                    for a, _ in pairs(UCS.profile.args) do switches[a] = readArg(cockpit, a) end
+                end
+                pcall(LoSetCommand, cmd, 1)
+                for _, a in ipairs(g.args) do e.appliedAt[a] = t end
+                e.pending = { arg = arg, cmd = cmd, at = t, before = before, switches = switches }
+            end
+            return
+        end
+    end
+end
+UCS.extReset = extReset
+extReset()
+
 -- -----------------------------------------------------------------------------
 -- Diagnostics
 -- -----------------------------------------------------------------------------
@@ -911,6 +1105,7 @@ LuaExportAfterNextFrame = function()
             if cockpit then
                 local w = wall()
                 updateControl(w)
+                extFrame(w)
                 sendFlight(cockpit, w)
                 injectFlight(cockpit, w)
                 if UCS.diag then diagFrame(cockpit, w) end

@@ -151,7 +151,8 @@ internal sealed class SyncServer
 
     public string? PublicAddress { get; private set; }
 
-    private static readonly List<string> ServerFeatures = new() { Protocol.Features.ModCheck, Protocol.Features.UcsVersionCheck, Protocol.Features.FlightMirror };
+    private static readonly List<string> ServerFeatures = new() { Protocol.Features.ModCheck, Protocol.Features.UcsVersionCheck, Protocol.Features.FlightMirror,
+        Protocol.Features.ExternalState };
 
     /// <summary>Tells the admin when a newer UCS-Server is published (never updates by itself).</summary>
     private async Task UpdateNoticeLoopAsync(CancellationToken ct)
@@ -183,6 +184,7 @@ internal sealed class SyncServer
             case Protocol.State: HandleState(msg, from); break;
             case Protocol.Args: HandleArgs(msg, from); break;
             case Protocol.Flight: HandleArgs(msg, from); break;
+            case Protocol.Ext: HandleArgs(msg, from); break;
             case Protocol.Leave: HandleLeave(msg, from); break;
         }
     }
@@ -358,7 +360,7 @@ internal sealed class SyncServer
 
         var outMsg = new UcsMessage
         {
-            Type = msg.Type == Protocol.Flight ? Protocol.Flight : Protocol.Args,
+            Type = msg.Type is Protocol.Flight or Protocol.Ext ? msg.Type : Protocol.Args,
             ClientId = sender.Id,
             From = sender.Name,
             Aircraft = sender.Aircraft,
