@@ -3,7 +3,10 @@
 Items that can only be validated with a real release or in DCS. Check them off (and note the
 result) when tested.
 
-## Next release (first release with the in-app updater)
+## In-app updater (validated 0.1.1 -> 0.1.8, 2026-11-16/17)
+
+Old downloaded installers are deleted on the next download (0.1.8: only the new one left).
+
 
 The updater needs a newer release to update **to**, so the first real test happens when the release
 *after* the one that introduced it is published (e.g. installed 0.1.1-alpha → update to 0.1.2-alpha).
@@ -21,12 +24,12 @@ The updater needs a newer release to update **to**, so the first real test happe
 - [x] UAC denied (0.1.5 -> 0.1.6, 2026-11-17): FAILED - the client closed and nothing was installed (Inno asks
       for elevation after it starts). Fixed for the next release: the client waits for Setup's log before
       closing; denial -> "Update cancelled", client keeps running (tested with fake installers)
-- [ ] Next release: UAC denied -> "Update cancelled", client keeps running
+- [x] UAC denied (0.1.7 -> 0.1.8, 2026-11-17): "Update cancelled", client kept running; then updated normally
 - [x] Silent update keeps previous installer choices (DCS scripts re-copied to Saved Games, server hook,
       firewall rule not duplicated) and `Export.lua` still has exactly one UCS line
 - [ ] After updating with DCS open: client warns that DCS runs older scripts until restarted
-- [ ] `SHA256SUMS.txt` present in the release; tampered/mismatched file is rejected
-- [ ] UCS-Server prints the "new version available" notice
+- [x] `SHA256SUMS.txt` present in every release and verified by the updater ("SHA-256 OK"); tampered file rejection not tested in the field
+- [x] UCS-Server prints the "new version available" notice (0.1.7 server, also in UCS-Server.log)
 - [x] Silent update to 0.1.3 writes install-options.ini with the new network options on (defaults)
 
 ## Backward compatibility (new client ↔ older server)
