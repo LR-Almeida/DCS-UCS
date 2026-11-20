@@ -15,6 +15,17 @@
 Windows 10/11 x64. No .NET install needed (self-contained). The executables are not code-signed yet, so
 Windows SmartScreen may warn on first run.
 
+## What's new in 0.1.9-alpha
+
+- **Fix: crews that include the player hosting the DCS server now pair.** The host's UCS identified the DCS
+  server differently from the players who joined it (`MP:<name>/<mission>` vs `ip:port`), so they were never
+  put in the same cockpit. Every player now uses the DCS server name + mission name, which also pairs players
+  who joined the same server through different addresses (public IP, LAN, Radmin/Tailscale).
+- **⚠️ Everyone in the crew must update to 0.1.9:** a 0.1.8 player does not pair with a 0.1.9 one in multiplayer.
+  Until then, the same word in *Manual room override* on every client works on any version.
+- **Favorites tab** in the client: save UCS servers and connect with one click (add current, add, edit, remove).
+- New icons for UCS-Server (network badge) and UCS-ProfileGen (profile sheet badge).
+
 ## What's new in 0.1.8-alpha
 
 - **Application icon** for UCS-Client, UCS-Server, UCS-ProfileGen and the installer (sync arrows around a rotor).

@@ -10,7 +10,7 @@
 -- =============================================================================
 
 local UCSHook = {
-    version      = "0.1.8-alpha",
+    version      = "0.1.9-alpha",
     clientHost   = "127.0.0.1",
     clientPort   = 5053,
     prefix       = "UCS_AUTOCONNECT:",
@@ -98,29 +98,16 @@ local function getServerAddress()
     if not isMultiplayer() then
         return "LOCAL"
     end
-    -- 1) net.get_server_info() (newer builds)
-    local info = safe(function() return net.get_server_info() end)
-    if type(info) == "table" then
-        local host = info.address or info.ip or info.host or info.server_address
-        local port = info.port or info.server_port
-        if host and host ~= "" then
-            if port then return tostring(host) .. ":" .. tostring(port) end
-            return tostring(host)
-        end
-    elseif type(info) == "string" and info ~= "" then
-        return info
-    end
-    -- 2) net.get_server_host() (some builds return host, port)
-    local host, port = safe(function() return net.get_server_host() end)
-    if type(host) == "string" and host ~= "" then
-        if port then return host .. ":" .. tostring(port) end
-        return host
-    end
-    -- 3) Fallback: server host player name + mission name. Every client on the
-    --    same DCS server sees the same values, so the key is still shared.
-    local serverName = safe(function() return net.get_player_info(1, "name") end) or "server"
-    local mission = safe(function() return DCS.getMissionName() end) or "mission"
-    return "MP:" .. tostring(serverName) .. "/" .. tostring(mission)
+    -- Server host player (id 1) name + mission name: every participant sees the same values,
+    -- including the player hosting the DCS server. The server IP is NOT used: the host has no
+    -- server address of its own (it got "MP:..." while its clients got "ip:port", so a crew with
+    -- the host in it never paired), and clients joining through different addresses (public IP,
+    -- LAN, Radmin/Tailscale) would not share it either.
+    local serverName = safe(function() return net.get_player_info(1, "name") end)
+    if type(serverName) ~= "string" or serverName == "" then serverName = "server" end
+    local mission = safe(function() return DCS.getMissionName() end)
+    if type(mission) ~= "string" or mission == "" then mission = "mission" end
+    return "MP:" .. serverName .. "/" .. mission
 end
 
 local function getPlayerUnitId()

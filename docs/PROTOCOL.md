@@ -106,11 +106,13 @@ restores any cockpit switch the press moved, undoes a toggle that changed anothe
 ## Hook → Client (JSON)
 
 ```json
-{"type":"slot","server":"1.2.3.4:10308","group":"Rescue-1","unit":"Rescue-1-1","aircraft":"UH-60L","in_aircraft":true}
+{"type":"slot","server":"MP:My Server/Rescue Ops","group":"Rescue-1","unit":"Rescue-1-1","aircraft":"UH-60L","in_aircraft":true}
 {"type":"autoconnect","addr":"192.168.1.50:5055"}
 ```
 
-`server` is `"LOCAL"` in single player. 0.1.2+ also sends `player` (DCS name, "" for the single-player
+`server` is `"LOCAL"` in single player and `"MP:{name of player id 1 (the DCS server / host)}/{mission name}"`
+in multiplayer (0.1.9+; earlier hooks sent the server `ip:port` to clients and `MP:...` only to the host, so a
+crew that included the player hosting the DCS server never paired, and a 0.1.8 hook does not pair with a 0.1.9 one). 0.1.2+ also sends `player` (DCS name, "" for the single-player
 placeholder) and `seat` (1 = first seat, 2 = slot `"<unit>_2"`...). Auto-connect messages are only accepted from the
 DCS server (player id 0/1) so other players cannot redirect you.
 

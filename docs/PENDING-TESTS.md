@@ -156,3 +156,12 @@ controls sends flight input, all others mirror). Not tested yet.
       states and flight positions reach both; only the seat with the controls sends
 - [ ] Real mod with 3+ seats (when one is found): pairing, late join, control hand-over between any two seats
 - [ ] Mod that does not report `master`: confirm the "seat 0 flies" fallback does not block a seat that can fly
+
+## Pairing when a crew member hosts the DCS server (fix after 0.1.8, 2026-11-19)
+
+0.1.8 failed: the DCS host sent `MP:<host name>/<mission>` and its client `187.x.x.x:10308`, so the UCS
+server never paired them (same unit, same profile). The hook now sends `MP:<player 1 name>/<mission>` everywhere.
+
+- [ ] DCS host + client in the same OH-6A: UCS-Server log shows both under the same session key, sync works
+- [ ] Two clients on a third-party DCS server (joined by different addresses if possible): still pair
+- [ ] Dedicated server (no player hosting): key uses the server name, clients pair
