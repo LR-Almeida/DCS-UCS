@@ -165,3 +165,15 @@ server never paired them (same unit, same profile). The hook now sends `MP:<play
 - [ ] DCS host + client in the same OH-6A: UCS-Server log shows both under the same session key, sync works
 - [ ] Two clients on a third-party DCS server (joined by different addresses if possible): still pair
 - [ ] Dedicated server (no player hosting): key uses the server name, clients pair
+
+## Flight mirror calibration (fix in 0.1.10, 2026-11-20)
+
+0.1.9 field test: the OH-6A collective was mirrored upside down. When the mirror started both collectives
+were already down, so calibration accepted the first candidate (2004 not inverted) before the injection had
+moved anything. Now a candidate must be injected for 1.2 s before it is judged, and a calibrated axis that
+stays > 0.5 away from the crew member's for 2 s is calibrated again (max 3 times). Verified offline with the
+real calibrate/injectFlight code against a simulated OH-6A collective.
+
+- [ ] OH-6A, seat swap with both collectives down: log shows "collective uses command 2004 (inverted)"
+- [ ] Copilot collective follows the pilot's in the right direction after several seat swaps
+- [ ] No "calibrating again" loop while the pilot moves the collective normally

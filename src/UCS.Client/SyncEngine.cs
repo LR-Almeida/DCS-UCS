@@ -1162,7 +1162,9 @@ public sealed class SyncEngine : IDisposable
                 exportTimedOut = _exportActive && now - _exportLastSeen >= ExportAliveMs;
                 if (exportTimedOut) _exportActive = false;
             }
-            if (exportTimedOut) Log?.Invoke("UCS-Export.lua not responding. Standby.");
+            // DCS stops running export scripts while the game is paused (also a server pause or a time
+            // resync in multiplayer), so this is usually harmless: sync resumes on its own.
+            if (exportTimedOut) Log?.Invoke("DCS paused (or not sending data). Standby until it resumes.");
 
             EvaluateProfile();
 

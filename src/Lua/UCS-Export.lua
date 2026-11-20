@@ -50,7 +50,7 @@
 -- =============================================================================
 
 local UCS = {
-    version       = "0.1.9-alpha",
+    version       = "0.1.10-alpha",
     host          = "127.0.0.1",
     sendPort      = 5051,
     listenPort    = 5052,
@@ -702,7 +702,7 @@ end
 local function calibrate(f, axis, cands, cal, la, target, t)
     if cal.retryAt then
         if t < cal.retryAt then return end
-        cal.retryAt, cal.idx, cal.since = nil, 1, nil
+        cal.retryAt, cal.idx, cal.since, cal.candIdx = nil, 1, nil, nil
     end
     if math.abs(target) < 0.15 then cal.since = nil; return end
     if not cal.since or math.abs(target - (cal.ref or target)) > 0.05 then
@@ -710,6 +710,11 @@ local function calibrate(f, axis, cands, cal, la, target, t)
         return
     end
     if t - cal.since < 0.5 then return end
+    -- The candidate must have been injected long enough to move the control (OH-6A collective takes
+    -- ~0.85 s): otherwise a control that already sat where the crew member's is (both collectives
+    -- down when the mirror starts) "matches" before the injection did anything, and the wrong
+    -- direction is kept (field test 2026-11-20: collective calibrated non-inverted, mirrored upside down).
+    if not cal.candAt or t - cal.candAt < 1.2 then return end
     local c = cands[cal.idx]
     -- levers are not always linear (OH-6A throttle idles at 0.09): a bit more tolerance there
     local tol = (axis == "throttle" or axis == "collective") and 0.2 or 0.12
@@ -770,12 +775,30 @@ local function injectFlight(cockpit, t)
                             send("DIAG|Flight input mirror: " .. axis .. " DISABLED after 3 pauses (the local control keeps moving)")
                         end
                     end
+                elseif UCS.master ~= nil and math.abs(la - target) > 0.5 then
+                    -- Calibrated, DCS says who flies, yet the control stays far from the crew member's:
+                    -- the calibration was wrong (direction or command). Calibrate again (max 3 times).
+                    cal.badSince = cal.badSince or t
+                    if t - cal.badSince > 2.0 then
+                        cal.badSince, cal.ok, cal.since = nil, nil, nil
+                        cal.recal = (cal.recal or 0) + 1
+                        if cal.recal > 3 then
+                            UCS.axisOff[axis] = true
+                            send("DIAG|Flight input mirror: " .. axis .. " DISABLED, it keeps going elsewhere after 3 calibrations")
+                        else
+                            log("Flight input mirror: " .. axis .. " off target after calibration, calibrating again")
+                            send("DIAG|Flight input mirror: " .. axis .. string.format(
+                                " calibrating again (local %.2f vs received %.2f)", la, target))
+                        end
+                    end
                 else
+                    cal.badSince = nil
                     UCS.injectOff[axis] = nil
                     UCS.axisPauses[axis] = 0
                 end
             end
             local c = cands[cal.idx]
+            if c and cal.candIdx ~= cal.idx then cal.candIdx, cal.candAt = cal.idx, t end
             if c and not paused and not UCS.axisOff[axis] then   -- no candidate while waiting to retry
                 local cmdValue = target * c.sign
                 pcall(LoSetCommand, c.cmd, cmdValue)

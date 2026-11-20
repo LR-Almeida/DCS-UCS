@@ -15,6 +15,18 @@
 Windows 10/11 x64. No .NET install needed (self-contained). The executables are not code-signed yet, so
 Windows SmartScreen may warn on first run.
 
+## What's new in 0.1.10-alpha
+
+- **Fix: flight mirror could move a control in the opposite direction** (seen on the OH-6A collective: the
+  copilot's went fully up while the pilot's was down). When the mirror started with both controls already in
+  the same place, the direction test passed before the injected input had moved anything. A direction is now
+  only judged after it has been applied for 1.2 s, and a mirrored control that stays far from the crew
+  member's for 2 s is calibrated again automatically.
+- Client log: a game pause now shows "DCS paused (or not sending data). Standby until it resumes." instead of
+  "UCS-Export.lua not responding" (DCS stops running export scripts while paused; sync resumes on its own).
+- Crew members on 0.1.9 and 0.1.10 pair and sync together (the fix is local to each seat; update the seat
+  that receives the mirror).
+
 ## What's new in 0.1.9-alpha
 
 - **Fix: crews that include the player hosting the DCS server now pair.** The host's UCS identified the DCS
